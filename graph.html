@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Graph · TV &amp; Movies Brain</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="graph.css">
+  <script src="https://unpkg.com/vis-network@9.1.10/standalone/umd/vis-network.min.js"></script>
+</head>
+<body class="graph-page">
+  <header>
+    <div class="header-row">
+      <h1>TV &amp; Movies Brain</h1>
+      <nav>
+        <a href="index.html">Recommendations</a>
+        <a href="graph.html" class="active">Graph</a>
+      </nav>
+    </div>
+    <p class="subtitle" id="subtitle">Loading&hellip;</p>
+  </header>
+
+  <div id="graph-shell">
+    <aside id="graph-controls">
+      <h2>Edges via</h2>
+      <div class="role-chips" id="role-chips">
+        <button class="chip active" data-role="creator">creator</button>
+        <button class="chip active" data-role="showrunner">showrunner</button>
+        <button class="chip active" data-role="writer">writer</button>
+        <button class="chip active" data-role="director">director</button>
+        <button class="chip active" data-role="producer">producer</button>
+        <button class="chip" data-role="actor">actor</button>
+      </div>
+
+      <h2>Min shared people: <span id="minppl-val">1</span></h2>
+      <input type="range" id="minppl" min="1" max="6" step="1" value="1">
+
+      <h2>Show</h2>
+      <div class="kind-chips" id="kind-chips">
+        <button class="chip active" data-kind="all">all</button>
+        <button class="chip" data-kind="loved">loved only</button>
+        <button class="chip" data-kind="tv">tv only</button>
+        <button class="chip" data-kind="movie">movies only</button>
+      </div>
+
+      <h2>Find a title</h2>
+      <input type="text" id="search" placeholder="type to focus...">
+      <div id="search-results"></div>
+
+      <p class="stats" id="stats"></p>
+    </aside>
+
+    <section id="network-container">
+      <div id="network"></div>
+    </section>
+
+    <aside id="details" class="hidden">
+      <button id="close-details" aria-label="Close">×</button>
+      <h3 id="d-title"></h3>
+      <p class="meta" id="d-meta"></p>
+      <h4>Tones</h4>
+      <p id="d-tones"></p>
+      <h4>Genres</h4>
+      <p id="d-genres"></p>
+      <h4>People</h4>
+      <ul id="d-people"></ul>
+      <h4>Connected titles</h4>
+      <ul id="d-connections"></ul>
+    </aside>
+  </div>
+
+  <script src="graph.js"></script>
+</body>
+</html>
