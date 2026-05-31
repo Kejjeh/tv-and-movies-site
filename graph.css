@@ -110,12 +110,30 @@
   overflow-y: auto;
 }
 #search-results .result {
-  padding: 0.25rem 0.4rem;
+  padding: 0.3rem 0.4rem;
   cursor: pointer;
   border-radius: 4px;
   color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 #search-results .result:hover { background: var(--surface-2); }
+#search-results .result-meta {
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+#search-results .result-header {
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  padding: 0.5rem 0.4rem 0.2rem;
+  font-weight: 600;
+}
+#search-results .result-header:first-child { padding-top: 0.2rem; }
 
 .stats {
   margin-top: 1.5rem;

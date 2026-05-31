@@ -20,14 +20,33 @@ const state = {
   nodes: null,
   edges: null,
   selectedId: null,
+  peopleIndex: null,  // person_id -> { id, name, roles: Map(role->count), titles: [{title, role}] }
 };
 
 async function load() {
   const r = await fetch("data.json");
   state.data = await r.json();
+  state.peopleIndex = buildPeopleIndex(state.data.titles);
   setSubtitle();
   bindControls();
   render();
+}
+
+function buildPeopleIndex(titles) {
+  const idx = new Map();
+  for (const t of titles) {
+    if (!t.seen) continue;
+    for (const p of t.people) {
+      let entry = idx.get(p.id);
+      if (!entry) {
+        entry = { id: p.id, name: p.name, roles: new Map(), titles: [] };
+        idx.set(p.id, entry);
+      }
+      entry.roles.set(p.role, (entry.roles.get(p.role) || 0) + 1);
+      entry.titles.push({ title: t, role: p.role });
+    }
+  }
+  return idx;
 }
 
 function setSubtitle() {
@@ -227,7 +246,18 @@ function render() {
   });
 }
 
+const TITLE_HEADERS = ["Tones", "Genres", "People", "Connected titles"];
+
+function resetPanelHeaders() {
+  const headers = document.querySelectorAll("#details h4");
+  for (let i = 0; i < headers.length; i++) {
+    headers[i].textContent = TITLE_HEADERS[i] || "";
+    headers[i].style.display = "";
+  }
+}
+
 function showDetails(nodeId) {
+  resetPanelHeaders();
   state.selectedId = nodeId;
   const t = state.nodes.get(nodeId)._payload;
   document.getElementById("d-title").textContent = `${t.name}${t.year ? ` (${t.year})` : ""}`;
@@ -290,20 +320,121 @@ function onSearch(q) {
   results.innerHTML = "";
   q = q.trim().toLowerCase();
   if (!q) return;
-  const matches = state.nodes.get()
+
+  const titleMatches = state.nodes.get()
     .filter(n => n._payload.name.toLowerCase().includes(q))
-    .slice(0, 10);
-  for (const n of matches) {
+    .slice(0, 6);
+  const peopleMatches = [...state.peopleIndex.values()]
+    .filter(p => p.name.toLowerCase().includes(q))
+    .sort((a, b) => b.titles.length - a.titles.length)
+    .slice(0, 8);
+
+  if (titleMatches.length === 0 && peopleMatches.length === 0) {
     const div = document.createElement("div");
     div.className = "result";
-    div.textContent = n._payload.name;
-    div.onclick = () => {
-      state.network.selectNodes([n.id]);
-      state.network.focus(n.id, { scale: 1.4, animation: { duration: 400 } });
-      showDetails(n.id);
-    };
+    div.style.color = "var(--text-dim)";
+    div.textContent = "no matches";
     results.appendChild(div);
+    return;
   }
+
+  if (titleMatches.length > 0) {
+    const h = document.createElement("div");
+    h.className = "result-header";
+    h.textContent = "TITLES";
+    results.appendChild(h);
+    for (const n of titleMatches) {
+      const div = document.createElement("div");
+      div.className = "result";
+      div.textContent = n._payload.name;
+      div.onclick = () => {
+        state.network.selectNodes([n.id]);
+        state.network.focus(n.id, { scale: 1.4, animation: { duration: 400 } });
+        showDetails(n.id);
+      };
+      results.appendChild(div);
+    }
+  }
+  if (peopleMatches.length > 0) {
+    const h = document.createElement("div");
+    h.className = "result-header";
+    h.textContent = "PEOPLE";
+    results.appendChild(h);
+    for (const p of peopleMatches) {
+      const div = document.createElement("div");
+      div.className = "result";
+      const roleNames = [...p.roles.keys()].join(", ");
+      div.innerHTML = `${escapeHtml(p.name)}
+        <span class="result-meta">${p.titles.length}× · ${escapeHtml(roleNames)}</span>`;
+      div.onclick = () => showPerson(p.id);
+      results.appendChild(div);
+    }
+  }
+}
+
+function showPerson(personId) {
+  const p = state.peopleIndex.get(personId);
+  if (!p) return;
+  resetPanelHeaders();
+
+  const roleSummary = [...p.roles.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([role, n]) => n > 1 ? `${role} ×${n}` : role)
+    .join(", ");
+
+  document.getElementById("d-title").textContent = p.name;
+  document.getElementById("d-meta").textContent = `${p.titles.length} appearance${p.titles.length === 1 ? "" : "s"} · ${roleSummary}`;
+  document.getElementById("d-tones").textContent = "—";
+  document.getElementById("d-genres").textContent = "—";
+
+  document.getElementById("d-people").innerHTML = "";
+  const connUl = document.getElementById("d-connections");
+  connUl.innerHTML = "";
+
+  // Mutate the headers so the panel reads as a person view
+  const headers = document.querySelectorAll("#details h4");
+  if (headers.length >= 4) {
+    headers[0].textContent = "Roles";
+    headers[1].textContent = "Appearances in seen-set";
+    headers[2].textContent = "Titles";
+    headers[3].style.display = "none";
+  }
+  document.getElementById("d-tones").textContent = roleSummary;
+  document.getElementById("d-genres").textContent = `${p.titles.length} title${p.titles.length === 1 ? "" : "s"} below`;
+
+  // Reuse d-people for the title list with one-click navigation
+  const titlesUl = document.getElementById("d-people");
+  // sort by year desc
+  const sorted = [...p.titles].sort((a, b) =>
+    (b.title.year || 0) - (a.title.year || 0)
+  );
+  for (const entry of sorted) {
+    const t = entry.title;
+    const li = document.createElement("li");
+    const yr = t.year ? `(${t.year})` : "";
+    const loved = t.loved ? " ★" : "";
+    li.innerHTML = `<a class="title-link" data-id="${t.tmdb_id}">${escapeHtml(t.name)} ${yr}${loved}</a>
+      <span class="role">${escapeHtml(entry.role)}${t.kind === "movie" ? " · movie" : ""}</span>`;
+    titlesUl.appendChild(li);
+  }
+  titlesUl.querySelectorAll(".title-link").forEach(a => {
+    a.onclick = () => {
+      const tid = parseInt(a.dataset.id, 10);
+      showDetails(tid);
+      state.network.selectNodes([tid]);
+      state.network.focus(tid, { scale: 1.3, animation: { duration: 400 } });
+    };
+  });
+
+  // Highlight all this person's title nodes in the graph
+  const ids = p.titles.map(t => t.title.tmdb_id).filter(id => state.nodes.get(id));
+  if (ids.length > 0) {
+    state.network.selectNodes(ids);
+    if (ids.length > 1) state.network.fit({ nodes: ids, animation: { duration: 500 } });
+    else state.network.focus(ids[0], { scale: 1.3, animation: { duration: 400 } });
+  }
+
+  document.getElementById("details").classList.remove("hidden");
 }
 
 function escapeHtml(s) {
