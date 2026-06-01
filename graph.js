@@ -231,138 +231,35 @@ function edgeColor(weight) {
   return `rgba(138, 180, 248, ${a.toFixed(2)})`;
 }
 
-// ---- Community detection (Label Propagation) ---------------------------
+// ---- Server-computed clusters (Louvain, baked into data.json) ----------
 
-function computeClusters(edgeList, titles) {
-  // Build adjacency from current edges
-  const adj = new Map();
-  for (const t of titles) adj.set(t.tmdb_id, []);
-  for (const e of edgeList) {
-    if (!adj.has(e.from) || !adj.has(e.to)) continue;
-    adj.get(e.from).push(e.to);
-    adj.get(e.to).push(e.from);
-  }
-
-  // Initialise labels: each node its own label
-  const labels = new Map();
-  const ids = [...adj.keys()];
-  for (const id of ids) labels.set(id, id);
-
-  // Deterministic-ish shuffle using a fixed-seed LCG so re-renders are stable
-  function shuffled(arr) {
-    const a = arr.slice();
-    let seed = 1337;
-    for (let i = a.length - 1; i > 0; i--) {
-      seed = (seed * 1664525 + 1013904223) >>> 0;
-      const j = seed % (i + 1);
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-  }
-
-  const MAX_ITERS = 25;
-  for (let iter = 0; iter < MAX_ITERS; iter++) {
-    let changed = false;
-    const order = shuffled(ids);
-    for (const id of order) {
-      const nbrs = adj.get(id);
-      if (!nbrs || nbrs.length === 0) continue;
-      // Count neighbour labels
-      const counts = new Map();
-      for (const n of nbrs) {
-        const l = labels.get(n);
-        counts.set(l, (counts.get(l) || 0) + 1);
-      }
-      // Pick most common; tiebreak by lower label id
-      let bestLabel = null;
-      let bestCount = -1;
-      for (const [l, c] of counts) {
-        if (c > bestCount || (c === bestCount && l < bestLabel)) {
-          bestLabel = l;
-          bestCount = c;
-        }
-      }
-      if (bestLabel !== null && bestLabel !== labels.get(id)) {
-        labels.set(id, bestLabel);
-        changed = true;
-      }
-    }
-    if (!changed) break;
-  }
-
-  // Group by raw label, then compact to contiguous IDs sorted by size desc
-  const groups = new Map();
-  for (const [id, l] of labels) {
-    if (!groups.has(l)) groups.set(l, []);
-    groups.get(l).push(id);
-  }
-  const sortedGroups = [...groups.values()].sort((a, b) => b.length - a.length);
-
+function populateClustersFromData(titles) {
+  // Read cluster_id assigned by scripts/export_to_json.py (Louvain).
   const clusters = new Map();
   const clusterMembers = new Map();
-  let nextId = 0;
-  for (const group of sortedGroups) {
-    if (group.length < 3) {
-      for (const id of group) clusters.set(id, -1);
-      continue;
-    }
-    const cid = nextId++;
-    const set = new Set(group);
-    clusterMembers.set(cid, set);
-    for (const id of group) clusters.set(id, cid);
+  for (const t of titles) {
+    const cid = (t.cluster_id === undefined ? -1 : t.cluster_id);
+    clusters.set(t.tmdb_id, cid);
+    if (!clusterMembers.has(cid)) clusterMembers.set(cid, new Set());
+    clusterMembers.get(cid).add(t.tmdb_id);
   }
-  // Make sure isolated bucket exists if any
-  const isolated = new Set();
-  for (const [id, c] of clusters) if (c === -1) isolated.add(id);
-  if (isolated.size > 0) clusterMembers.set(-1, isolated);
-
   state.clusters = clusters;
   state.clusterMembers = clusterMembers;
-}
 
-function deriveClusterLabels(titles) {
-  const byId = new Map(titles.map(t => [t.tmdb_id, t]));
+  // Build labels from the server-side metadata
+  const labelByCid = new Map();
+  for (const c of (state.data.clusters || [])) {
+    // Trim auteur labels to last name where reasonable
+    const parts = c.label.split(/\s+/);
+    const text = parts.length > 1 ? parts[parts.length - 1] : c.label;
+    labelByCid.set(c.cluster_id, text);
+  }
+
   const out = [];
-  for (const [cid, members] of state.clusterMembers) {
+  for (const [cid, members] of clusterMembers) {
     if (cid === -1) continue;
     if (members.size < 4) continue;
-    // Tally non-actor people across titles in this cluster
-    const personCounts = new Map(); // personId -> {name, count}
-    const toneCounts = new Map();
-    for (const tid of members) {
-      const t = byId.get(tid);
-      if (!t) continue;
-      for (const tone of t.tone_tags || []) {
-        toneCounts.set(tone, (toneCounts.get(tone) || 0) + 1);
-      }
-      const seenInThisTitle = new Set();
-      for (const p of t.people) {
-        if (!NON_ACTOR_ROLES.has(p.role)) continue;
-        if (seenInThisTitle.has(p.id)) continue;
-        seenInThisTitle.add(p.id);
-        const e = personCounts.get(p.id) || { name: p.name, count: 0 };
-        e.count++;
-        personCounts.set(p.id, e);
-      }
-    }
-    // Best person: highest title-coverage; require ≥2 titles to count as a person label
-    let best = null;
-    for (const e of personCounts.values()) {
-      if (e.count < 2) continue;
-      if (!best || e.count > best.count) best = e;
-    }
-    let text;
-    if (best) {
-      // Use last name (1 word) if the name has multiple parts, otherwise full
-      const parts = best.name.split(/\s+/);
-      text = parts.length > 1 ? parts[parts.length - 1] : best.name;
-    } else {
-      let bestTone = null, bestN = 0;
-      for (const [tone, n] of toneCounts) {
-        if (n > bestN) { bestTone = tone; bestN = n; }
-      }
-      text = bestTone || `cluster ${cid}`;
-    }
+    const text = labelByCid.get(cid) || `cluster ${cid}`;
     out.push({ clusterId: cid, text, ids: [...members] });
   }
   state.clusterLabels = out;
@@ -440,8 +337,7 @@ function clearAllLabels() {
 function render() {
   const titles = filterTitles();
   const edgeList = buildEdges(titles);
-  computeClusters(edgeList, titles);
-  deriveClusterLabels(titles);
+  populateClustersFromData(titles);
   const nodeList = buildNodes(titles);
 
   document.getElementById("stats").textContent =

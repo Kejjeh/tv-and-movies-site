@@ -13,6 +13,9 @@ const state = {
   minRating: 7.5,
   topN: 10,
   kind: "all",
+  lane: null,         // null | cluster_id
+  laneMembers: null,  // Set of {tmdb_id, kind} keys belonging to selected lane (seen titles)
+  lanePeople: null,   // Set of person ids covered by the selected lane
 };
 
 async function load() {
@@ -20,11 +23,67 @@ async function load() {
   DATA = await r.json();
   WEIGHTS = DATA.weights;
   ROLE_WEIGHTS = DATA.role_weights;
+  buildLaneChips();
   buildMoodChips();
   buildKindChips();
   bindControls();
   setSubtitle();
   setUpdated();
+  render();
+}
+
+function buildLaneChips() {
+  const c = document.getElementById("lane-chips");
+  c.innerHTML = "";
+  // "all" first
+  const all = document.createElement("button");
+  all.className = "chip active";
+  all.textContent = "all";
+  all.onclick = () => selectLane(null, all);
+  c.appendChild(all);
+
+  // Sort clusters by size desc (data.json already orders them this way, but be defensive)
+  const sorted = [...(DATA.clusters || [])].sort((a, b) => b.size - a.size);
+  // Show only the top 12 lanes — beyond that it gets noisy
+  for (const cl of sorted.slice(0, 12)) {
+    const b = document.createElement("button");
+    b.className = "chip lane-chip";
+    const label = (cl.label || `cluster ${cl.cluster_id}`).split(/\s+/).slice(-2).join(" ");
+    b.innerHTML = `${label} <span class="lane-size">${cl.size}</span>`;
+    b.title = `${cl.label} · ${cl.size} titles · ${cl.dominant_tone}`;
+    b.dataset.cid = String(cl.cluster_id);
+    b.onclick = () => selectLane(cl.cluster_id, b);
+    c.appendChild(b);
+  }
+}
+
+function selectLane(cid, chip) {
+  // Toggle
+  if (state.lane === cid) {
+    state.lane = null;
+    state.laneMembers = null;
+    state.lanePeople = null;
+    document.querySelectorAll("#lane-chips .chip").forEach(x => x.classList.remove("active"));
+    document.querySelector('#lane-chips .chip').classList.add("active"); // "all"
+  } else {
+    state.lane = cid;
+    document.querySelectorAll("#lane-chips .chip").forEach(x => x.classList.remove("active"));
+    chip.classList.add("active");
+    if (cid === null) {
+      state.laneMembers = null;
+      state.lanePeople = null;
+    } else {
+      // Precompute member keys + people from this lane's seen titles
+      state.laneMembers = new Set();
+      state.lanePeople = new Set();
+      for (const t of DATA.titles) {
+        if (!t.seen) continue;
+        if (t.cluster_id !== cid) continue;
+        state.laneMembers.add(`${t.tmdb_id}|${t.kind}`);
+        for (const p of t.people) state.lanePeople.add(p.id);
+      }
+    }
+  }
   render();
 }
 
@@ -175,6 +234,11 @@ function render() {
   let cands = DATA.titles.filter(t => !t.seen);
   if (state.kind !== "all") cands = cands.filter(t => t.kind === state.kind);
   cands = cands.filter(t => t.imdb_rating === null || t.imdb_rating >= state.minRating);
+
+  // Lane filter: candidate must share at least 1 person with the selected lane's seen titles
+  if (state.lane !== null && state.lanePeople) {
+    cands = cands.filter(c => c.people.some(p => state.lanePeople.has(p.id)));
+  }
 
   const mood = [...state.mood];
   const recs = cands.map(c => scoreCandidate(c, seen, mood));

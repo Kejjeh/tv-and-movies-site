@@ -82,11 +82,20 @@ aside h2 {
 
 aside h2:first-child { margin-top: 0; }
 
-#mood-chips, #kind-chips {
+#mood-chips, #kind-chips, #lane-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
 }
+
+#lane-chips .lane-size {
+  display: inline-block;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-left: 0.25rem;
+  font-weight: 400;
+}
+#lane-chips .chip.active .lane-size { color: rgba(13, 19, 32, 0.65); }
 
 .chip {
   background: var(--surface-2);
