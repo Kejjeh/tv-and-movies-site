@@ -12,6 +12,7 @@ const state = {
   mood: new Set(),
   themes: new Set(),
   themesExpanded: false,
+  narratives: new Set(),
   minRating: 7.5,
   topN: 10,
   kind: "all",
@@ -30,11 +31,38 @@ async function load() {
   buildLaneChips();
   buildMoodChips();
   buildThemeChips();
+  buildNarrativeChips();
   buildKindChips();
   bindControls();
   setSubtitle();
   setUpdated();
   render();
+}
+
+function buildNarrativeChips() {
+  const c = document.getElementById("narrative-chips");
+  c.innerHTML = "";
+  const all = DATA.narratives || [];
+  // Sort by count desc but show all (it's a fixed-vocabulary list of ~40)
+  const sorted = [...all].sort((a, b) => b.count - a.count);
+  for (const n of sorted) {
+    const b = document.createElement("button");
+    b.className = "chip narrative-chip";
+    if (state.narratives.has(n.id)) b.classList.add("active");
+    b.innerHTML = `${escapeHtml(n.label)} <span class="narrative-size">${n.count}</span>`;
+    b.title = n.description || "";
+    b.onclick = () => {
+      if (state.narratives.has(n.id)) {
+        state.narratives.delete(n.id);
+        b.classList.remove("active");
+      } else {
+        state.narratives.add(n.id);
+        b.classList.add("active");
+      }
+      render();
+    };
+    c.appendChild(b);
+  }
 }
 
 function buildThemeChips() {
@@ -287,6 +315,13 @@ function render() {
     );
   }
 
+  // Narrative filter: candidate must carry at least one selected archetype
+  if (state.narratives.size > 0) {
+    cands = cands.filter(c =>
+      (c.narratives || []).some(n => state.narratives.has(n))
+    );
+  }
+
   const mood = [...state.mood];
   const recs = cands.map(c => scoreCandidate(c, seen, mood));
   recs.sort((a, b) => b.score - a.score);
@@ -314,6 +349,17 @@ function render() {
           return `<span class="rec-theme${active}">${escapeHtml(t)}</span>`;
         }).join("")}
       </div>`;
+    // Narratives — look up labels in DATA.narratives
+    const narrIds = rec.title.narratives || [];
+    const narrLookup = new Map((DATA.narratives || []).map(n => [n.id, n]));
+    const narrEntries = narrIds.map(id => narrLookup.get(id)).filter(Boolean);
+    const narrHtml = narrEntries.length === 0 ? "" : `
+      <div class="rec-narratives">
+        ${narrEntries.map(n => {
+          const active = state.narratives.has(n.id) ? " active" : "";
+          return `<span class="rec-narrative${active}" title="${escapeHtml(n.description || '')}">${escapeHtml(n.label)}</span>`;
+        }).join("")}
+      </div>`;
     card.innerHTML = `
       <h3><span class="rank">${i + 1}.</span>${escapeHtml(rec.title.name)}${year}${kindBadge}</h3>
       <div class="meta">${imdb}score ${rec.score.toFixed(3)}</div>
@@ -324,6 +370,7 @@ function render() {
         genre ${rec.breakdown.genre_fit.toFixed(2)} ·
         mood ${rec.breakdown.mood_match.toFixed(2)}
       </div>
+      ${narrHtml}
       ${themesHtml}
       <ul class="reasons">
         ${rec.reasons.slice(0, 6).map(r => `<li>${escapeHtml(r)}</li>`).join("")}
