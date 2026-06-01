@@ -15,6 +15,7 @@
       <nav>
         <a href="index.html">Recommendations</a>
         <a href="graph.html" class="active">Graph</a>
+        <a href="insights.html">Insights</a>
       </nav>
     </div>
     <p class="subtitle" id="subtitle">Loading&hellip;</p>
@@ -34,6 +35,12 @@
 
       <h2>Min shared people: <span id="minppl-val">1</span></h2>
       <input type="range" id="minppl" min="1" max="6" step="1" value="1">
+
+      <h2>Color by</h2>
+      <div id="color-mode" class="kind-chips">
+        <button class="chip active" data-mode="tone">tone</button>
+        <button class="chip" data-mode="cluster">cluster</button>
+      </div>
 
       <h2>Show</h2>
       <div class="kind-chips" id="kind-chips">

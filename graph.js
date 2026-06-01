@@ -11,6 +11,14 @@ const TONE_COLOR = {
   surreal: "#ff8aa6",
 };
 
+const CLUSTER_PALETTE = [
+  "#8ab4f8", "#ff8aa6", "#c293ff", "#f5c518", "#5dd6c4", "#e58c5a",
+  "#ffb86b", "#7ee787", "#ff79c6", "#bd93f9", "#50fa7b", "#ffb86c",
+];
+const ISOLATED_COLOR = "#5a5d66";
+
+const NON_ACTOR_ROLES = new Set(["creator", "showrunner", "writer", "director", "producer"]);
+
 const state = {
   data: null,
   roles: new Set(["creator", "showrunner", "writer", "director", "producer"]),
@@ -21,6 +29,11 @@ const state = {
   edges: null,
   selectedId: null,
   peopleIndex: null,  // person_id -> { id, name, roles: Map(role->count), titles: [{title, role}] }
+  colorMode: "tone",
+  clusters: new Map(),         // nodeId -> clusterId (-1 for isolated)
+  clusterMembers: new Map(),   // clusterId -> Set(nodeId)
+  clusterLabels: [],           // [{clusterId, text, ids}]
+  _labelEls: new Map(),        // clusterId -> HTMLElement
 };
 
 async function load() {
@@ -65,6 +78,16 @@ function bindControls() {
       render();
     };
   });
+  document.querySelectorAll("#color-mode .chip").forEach(b => {
+    b.onclick = () => {
+      const mode = b.dataset.mode;
+      if (mode === state.colorMode) return;
+      state.colorMode = mode;
+      document.querySelectorAll("#color-mode .chip").forEach(x => x.classList.remove("active"));
+      b.classList.add("active");
+      applyColorMode();
+    };
+  });
   document.querySelectorAll("#kind-chips .chip").forEach(b => {
     b.onclick = () => {
       state.kind = b.dataset.kind;
@@ -96,10 +119,19 @@ function filterTitles() {
   return t;
 }
 
+function colorForNode(t) {
+  if (state.colorMode === "cluster") {
+    const cid = state.clusters.get(t.tmdb_id);
+    if (cid === undefined || cid === -1) return ISOLATED_COLOR;
+    return CLUSTER_PALETTE[cid % CLUSTER_PALETTE.length];
+  }
+  const primaryTone = t.tone_tags[0] || "cerebral";
+  return TONE_COLOR[primaryTone] || "#8ab4f8";
+}
+
 function buildNodes(titles) {
   return titles.map(t => {
-    const primaryTone = t.tone_tags[0] || "cerebral";
-    const baseColor = TONE_COLOR[primaryTone] || "#8ab4f8";
+    const baseColor = colorForNode(t);
     return {
       id: t.tmdb_id,
       label: t.name,
@@ -199,15 +231,226 @@ function edgeColor(weight) {
   return `rgba(138, 180, 248, ${a.toFixed(2)})`;
 }
 
+// ---- Community detection (Label Propagation) ---------------------------
+
+function computeClusters(edgeList, titles) {
+  // Build adjacency from current edges
+  const adj = new Map();
+  for (const t of titles) adj.set(t.tmdb_id, []);
+  for (const e of edgeList) {
+    if (!adj.has(e.from) || !adj.has(e.to)) continue;
+    adj.get(e.from).push(e.to);
+    adj.get(e.to).push(e.from);
+  }
+
+  // Initialise labels: each node its own label
+  const labels = new Map();
+  const ids = [...adj.keys()];
+  for (const id of ids) labels.set(id, id);
+
+  // Deterministic-ish shuffle using a fixed-seed LCG so re-renders are stable
+  function shuffled(arr) {
+    const a = arr.slice();
+    let seed = 1337;
+    for (let i = a.length - 1; i > 0; i--) {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      const j = seed % (i + 1);
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  const MAX_ITERS = 25;
+  for (let iter = 0; iter < MAX_ITERS; iter++) {
+    let changed = false;
+    const order = shuffled(ids);
+    for (const id of order) {
+      const nbrs = adj.get(id);
+      if (!nbrs || nbrs.length === 0) continue;
+      // Count neighbour labels
+      const counts = new Map();
+      for (const n of nbrs) {
+        const l = labels.get(n);
+        counts.set(l, (counts.get(l) || 0) + 1);
+      }
+      // Pick most common; tiebreak by lower label id
+      let bestLabel = null;
+      let bestCount = -1;
+      for (const [l, c] of counts) {
+        if (c > bestCount || (c === bestCount && l < bestLabel)) {
+          bestLabel = l;
+          bestCount = c;
+        }
+      }
+      if (bestLabel !== null && bestLabel !== labels.get(id)) {
+        labels.set(id, bestLabel);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+
+  // Group by raw label, then compact to contiguous IDs sorted by size desc
+  const groups = new Map();
+  for (const [id, l] of labels) {
+    if (!groups.has(l)) groups.set(l, []);
+    groups.get(l).push(id);
+  }
+  const sortedGroups = [...groups.values()].sort((a, b) => b.length - a.length);
+
+  const clusters = new Map();
+  const clusterMembers = new Map();
+  let nextId = 0;
+  for (const group of sortedGroups) {
+    if (group.length < 3) {
+      for (const id of group) clusters.set(id, -1);
+      continue;
+    }
+    const cid = nextId++;
+    const set = new Set(group);
+    clusterMembers.set(cid, set);
+    for (const id of group) clusters.set(id, cid);
+  }
+  // Make sure isolated bucket exists if any
+  const isolated = new Set();
+  for (const [id, c] of clusters) if (c === -1) isolated.add(id);
+  if (isolated.size > 0) clusterMembers.set(-1, isolated);
+
+  state.clusters = clusters;
+  state.clusterMembers = clusterMembers;
+}
+
+function deriveClusterLabels(titles) {
+  const byId = new Map(titles.map(t => [t.tmdb_id, t]));
+  const out = [];
+  for (const [cid, members] of state.clusterMembers) {
+    if (cid === -1) continue;
+    if (members.size < 4) continue;
+    // Tally non-actor people across titles in this cluster
+    const personCounts = new Map(); // personId -> {name, count}
+    const toneCounts = new Map();
+    for (const tid of members) {
+      const t = byId.get(tid);
+      if (!t) continue;
+      for (const tone of t.tone_tags || []) {
+        toneCounts.set(tone, (toneCounts.get(tone) || 0) + 1);
+      }
+      const seenInThisTitle = new Set();
+      for (const p of t.people) {
+        if (!NON_ACTOR_ROLES.has(p.role)) continue;
+        if (seenInThisTitle.has(p.id)) continue;
+        seenInThisTitle.add(p.id);
+        const e = personCounts.get(p.id) || { name: p.name, count: 0 };
+        e.count++;
+        personCounts.set(p.id, e);
+      }
+    }
+    // Best person: highest title-coverage; require ≥2 titles to count as a person label
+    let best = null;
+    for (const e of personCounts.values()) {
+      if (e.count < 2) continue;
+      if (!best || e.count > best.count) best = e;
+    }
+    let text;
+    if (best) {
+      // Use last name (1 word) if the name has multiple parts, otherwise full
+      const parts = best.name.split(/\s+/);
+      text = parts.length > 1 ? parts[parts.length - 1] : best.name;
+    } else {
+      let bestTone = null, bestN = 0;
+      for (const [tone, n] of toneCounts) {
+        if (n > bestN) { bestTone = tone; bestN = n; }
+      }
+      text = bestTone || `cluster ${cid}`;
+    }
+    out.push({ clusterId: cid, text, ids: [...members] });
+  }
+  state.clusterLabels = out;
+}
+
+function ensureLabelEls() {
+  const container = document.getElementById("network-container");
+  // Remove stale
+  const liveIds = new Set(state.clusterLabels.map(l => l.clusterId));
+  for (const [cid, el] of state._labelEls) {
+    if (!liveIds.has(cid)) {
+      el.remove();
+      state._labelEls.delete(cid);
+    }
+  }
+  for (const lbl of state.clusterLabels) {
+    let el = state._labelEls.get(lbl.clusterId);
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "cluster-label";
+      container.appendChild(el);
+      state._labelEls.set(lbl.clusterId, el);
+    }
+    el.textContent = lbl.text;
+  }
+}
+
+function renderClusterLabels() {
+  if (state.colorMode !== "cluster" || !state.network) {
+    for (const el of state._labelEls.values()) el.style.display = "none";
+    return;
+  }
+  for (const lbl of state.clusterLabels) {
+    const el = state._labelEls.get(lbl.clusterId);
+    if (!el) continue;
+    const positions = state.network.getPositions(lbl.ids);
+    let sx = 0, sy = 0, n = 0;
+    for (const id of lbl.ids) {
+      const p = positions[id];
+      if (!p) continue;
+      sx += p.x; sy += p.y; n++;
+    }
+    if (n === 0) { el.style.display = "none"; continue; }
+    const dom = state.network.canvasToDOM({ x: sx / n, y: sy / n });
+    el.style.left = `${dom.x}px`;
+    el.style.top = `${dom.y}px`;
+    el.style.display = "";
+  }
+}
+
+function applyColorMode() {
+  if (!state.nodes) return;
+  const updates = [];
+  state.nodes.forEach(n => {
+    const t = n._payload;
+    const baseColor = colorForNode(t);
+    updates.push({
+      id: n.id,
+      color: {
+        background: baseColor,
+        border: t.loved ? "#fff7a8" : "#1a1d27",
+        highlight: { background: "#fff", border: "#ff8aa6" },
+      },
+    });
+  });
+  state.nodes.update(updates);
+  renderClusterLabels();
+}
+
+function clearAllLabels() {
+  for (const el of state._labelEls.values()) el.remove();
+  state._labelEls.clear();
+}
+
 function render() {
   const titles = filterTitles();
-  const nodeList = buildNodes(titles);
   const edgeList = buildEdges(titles);
+  computeClusters(edgeList, titles);
+  deriveClusterLabels(titles);
+  const nodeList = buildNodes(titles);
 
   document.getElementById("stats").textContent =
     `${nodeList.length} nodes · ${edgeList.length} edges`;
 
-  if (state.network) state.network.destroy();
+  if (state.network) {
+    state.network.destroy();
+    clearAllLabels();
+  }
   state.nodes = new vis.DataSet(nodeList);
   state.edges = new vis.DataSet(edgeList);
 
@@ -244,6 +487,12 @@ function render() {
     if (params.nodes.length === 0) return;
     state.network.focus(params.nodes[0], { scale: 1.3, animation: { duration: 400 } });
   });
+
+  ensureLabelEls();
+  state.network.on("afterDrawing", renderClusterLabels);
+  state.network.on("zoom", renderClusterLabels);
+  state.network.on("dragEnd", renderClusterLabels);
+  renderClusterLabels();
 }
 
 const TITLE_HEADERS = ["Tones", "Genres", "People", "Connected titles"];

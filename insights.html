@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Insights &middot; TV &amp; Movies Brain</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="insights.css">
+</head>
+<body class="insights-page">
+  <header>
+    <div class="header-row">
+      <h1>TV &amp; Movies Brain</h1>
+      <nav>
+        <a href="index.html">Recommendations</a>
+        <a href="graph.html">Graph</a>
+        <a href="insights.html" class="active">Insights</a>
+      </nav>
+    </div>
+    <p class="subtitle" id="subtitle">Loading&hellip;</p>
+  </header>
+
+  <main class="insights-main">
+    <section id="section-auteurs" class="insight-section">
+      <h2>Hidden Auteurs</h2>
+      <p class="section-blurb">
+        Non-actor names that show up most across your loved titles &mdash;
+        creators, showrunners, writers, directors, producers.
+      </p>
+      <div id="auteurs-grid" class="auteurs-grid"></div>
+    </section>
+
+    <section id="section-filmography" class="insight-section">
+      <h2>Filmography Completion</h2>
+      <p class="section-blurb">
+        For each top auteur in your loved set, how much of their
+        notable work have you catalogued?
+      </p>
+      <div id="filmography-grid" class="filmography-grid"></div>
+    </section>
+
+    <section id="section-heatmap" class="insight-section">
+      <h2>Decade &times; Tone Heatmap</h2>
+      <p class="section-blurb">
+        Tone usage across decades. Hover a cell for the count.
+      </p>
+      <div class="heatmap-controls">
+        <button class="chip active" data-scope="seen" id="scope-seen">All seen</button>
+        <button class="chip" data-scope="loved" id="scope-loved">Loved only</button>
+      </div>
+      <div id="heatmap-container"></div>
+    </section>
+
+    <section id="section-contrarian" class="insight-section">
+      <h2>Contrarian Loves &amp; Acclaimed Misses</h2>
+      <p class="section-blurb">
+        Where your taste diverges from the broader audience.
+      </p>
+      <div class="contrarian-cols">
+        <div class="contrarian-col">
+          <h3>Contrarian Loves</h3>
+          <p class="col-blurb">Loved by you, IMDb &le; 7.0.</p>
+          <ol id="contrarian-loves" class="contrarian-list"></ol>
+        </div>
+        <div class="contrarian-col">
+          <h3>Acclaimed Misses</h3>
+          <p class="col-blurb">Seen but not loved, IMDb &ge; 8.5.</p>
+          <ol id="acclaimed-misses" class="contrarian-list"></ol>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="insights.js"></script>
+</body>
+</html>
