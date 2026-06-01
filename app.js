@@ -10,6 +10,8 @@ let ROLE_WEIGHTS = null;
 
 const state = {
   mood: new Set(),
+  themes: new Set(),
+  themesExpanded: false,
   minRating: 7.5,
   topN: 10,
   kind: "all",
@@ -18,6 +20,8 @@ const state = {
   lanePeople: null,   // Set of person ids covered by the selected lane
 };
 
+const THEMES_INITIAL = 30;
+
 async function load() {
   const r = await fetch("data.json");
   DATA = await r.json();
@@ -25,11 +29,47 @@ async function load() {
   ROLE_WEIGHTS = DATA.role_weights;
   buildLaneChips();
   buildMoodChips();
+  buildThemeChips();
   buildKindChips();
   bindControls();
   setSubtitle();
   setUpdated();
   render();
+}
+
+function buildThemeChips() {
+  const c = document.getElementById("theme-chips");
+  c.innerHTML = "";
+  const all = DATA.themes || [];
+  const visible = state.themesExpanded ? all : all.slice(0, THEMES_INITIAL);
+  for (const th of visible) {
+    const b = document.createElement("button");
+    b.className = "chip theme-chip";
+    if (state.themes.has(th.name)) b.classList.add("active");
+    b.innerHTML = `${escapeHtml(th.name)} <span class="theme-size">${th.count}</span>`;
+    b.onclick = () => {
+      if (state.themes.has(th.name)) {
+        state.themes.delete(th.name);
+        b.classList.remove("active");
+      } else {
+        state.themes.add(th.name);
+        b.classList.add("active");
+      }
+      render();
+    };
+    c.appendChild(b);
+  }
+  const toggle = document.getElementById("theme-toggle");
+  if (toggle && all.length > THEMES_INITIAL) {
+    toggle.textContent = state.themesExpanded
+      ? "show top"
+      : `show all (${all.length})`;
+    toggle.style.cursor = "pointer";
+    toggle.onclick = () => {
+      state.themesExpanded = !state.themesExpanded;
+      buildThemeChips();
+    };
+  }
 }
 
 function buildLaneChips() {
@@ -240,6 +280,13 @@ function render() {
     cands = cands.filter(c => c.people.some(p => state.lanePeople.has(p.id)));
   }
 
+  // Theme filter: candidate must carry at least one selected theme
+  if (state.themes.size > 0) {
+    cands = cands.filter(c =>
+      (c.themes || []).some(t => state.themes.has(t))
+    );
+  }
+
   const mood = [...state.mood];
   const recs = cands.map(c => scoreCandidate(c, seen, mood));
   recs.sort((a, b) => b.score - a.score);
@@ -259,6 +306,14 @@ function render() {
       ? `<span class="imdb">IMDb ${rec.title.imdb_rating}</span> · `
       : "";
     const kindBadge = rec.title.kind === "movie" ? '<span class="kind">movie</span>' : "";
+    const themes = (rec.title.themes || []);
+    const themesHtml = themes.length === 0 ? "" : `
+      <div class="rec-themes">
+        ${themes.map(t => {
+          const active = state.themes.has(t) ? " active" : "";
+          return `<span class="rec-theme${active}">${escapeHtml(t)}</span>`;
+        }).join("")}
+      </div>`;
     card.innerHTML = `
       <h3><span class="rank">${i + 1}.</span>${escapeHtml(rec.title.name)}${year}${kindBadge}</h3>
       <div class="meta">${imdb}score ${rec.score.toFixed(3)}</div>
@@ -269,6 +324,7 @@ function render() {
         genre ${rec.breakdown.genre_fit.toFixed(2)} ·
         mood ${rec.breakdown.mood_match.toFixed(2)}
       </div>
+      ${themesHtml}
       <ul class="reasons">
         ${rec.reasons.slice(0, 6).map(r => `<li>${escapeHtml(r)}</li>`).join("")}
       </ul>

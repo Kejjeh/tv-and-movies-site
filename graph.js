@@ -354,14 +354,15 @@ function render() {
   const options = {
     physics: {
       barnesHut: {
-        gravitationalConstant: -9000,
-        springLength: 220,
-        springConstant: 0.008,
-        damping: 0.28,
-        centralGravity: 0.15,
-        avoidOverlap: 0.4,
+        gravitationalConstant: -18000,
+        springLength: 340,
+        springConstant: 0.006,
+        damping: 0.32,
+        centralGravity: 0.06,
+        avoidOverlap: 0.6,
       },
-      stabilization: { iterations: 300 },
+      maxVelocity: 50,
+      stabilization: { iterations: 400 },
     },
     nodes: { borderWidth: 1 },
     edges: { smooth: false, width: 1 },
