@@ -16,6 +16,7 @@ const state = {
   minRating: 7.5,
   topN: 10,
   kind: "all",
+  mode: "recs",       // "recs" | "anti" — anti flips sort to ascending (blind spots)
   lane: null,         // null | cluster_id
   laneMembers: null,  // Set of {tmdb_id, kind} keys belonging to selected lane (seen titles)
   lanePeople: null,   // Set of person ids covered by the selected lane
@@ -33,6 +34,7 @@ async function load() {
   buildThemeChips();
   buildNarrativeChips();
   buildKindChips();
+  buildModeChips();
   bindControls();
   setSubtitle();
   setUpdated();
@@ -159,8 +161,11 @@ function setSubtitle() {
   const seen = DATA.titles.filter(t => t.seen).length;
   const loved = DATA.titles.filter(t => t.loved).length;
   const cands = DATA.titles.filter(t => !t.seen).length;
-  document.getElementById("subtitle").textContent =
-    `${seen} seen · ${loved} loved · ${cands} candidates`;
+  const base = `${seen} seen · ${loved} loved · ${cands} candidates`;
+  const suffix = state.mode === "anti"
+    ? " · showing candidates least like your seen-set"
+    : "";
+  document.getElementById("subtitle").textContent = base + suffix;
 }
 
 function setUpdated() {
@@ -194,6 +199,82 @@ function buildKindChips() {
       render();
     };
   });
+}
+
+function buildModeChips() {
+  const c = document.getElementById("mode-chips");
+  if (!c) return;
+  c.innerHTML = "";
+  const modes = [
+    { id: "recs", label: "recs" },
+    { id: "anti", label: "blind spots" },
+  ];
+  for (const m of modes) {
+    const b = document.createElement("button");
+    b.className = "chip";
+    if (state.mode === m.id) b.classList.add("active");
+    b.textContent = m.label;
+    b.onclick = () => {
+      if (state.mode === m.id) return;
+      state.mode = m.id;
+      document.querySelectorAll("#mode-chips .chip").forEach(x => x.classList.remove("active"));
+      b.classList.add("active");
+      setSubtitle();
+      render();
+    };
+    c.appendChild(b);
+  }
+}
+
+/* Anti-reasons: explain why a candidate scored LOW. Mirrors WEIGHTS so the
+   parenthetical penalty equals the missing contribution (weight * (1 - dim)). */
+function buildAntiReasons(rec) {
+  const b = rec.breakdown;
+  const reasons = [];
+  const moodSelected = state.mood.size > 0;
+
+  if (b.people_overlap === 0) {
+    reasons.push(`(-${WEIGHTS.people_overlap.toFixed(3)}) No shared cast or crew with your seen set`);
+  } else if (b.people_overlap < 0.15) {
+    const miss = WEIGHTS.people_overlap * (1 - b.people_overlap);
+    reasons.push(`(-${miss.toFixed(3)}) Barely any cast/crew overlap with your seen set`);
+  }
+
+  if (b.tone_match === 0) {
+    reasons.push(`(-${WEIGHTS.tone_match.toFixed(3)}) None of its tones match yours`);
+  } else if (b.tone_match < 0.25) {
+    const miss = WEIGHTS.tone_match * (1 - b.tone_match);
+    reasons.push(`(-${miss.toFixed(3)}) Most of its tones are absent from your seen set`);
+  }
+
+  if (b.genre_fit === 0) {
+    reasons.push(`(-${WEIGHTS.genre_fit.toFixed(3)}) No shared genres`);
+  } else if (b.genre_fit < 0.34) {
+    const miss = WEIGHTS.genre_fit * (1 - b.genre_fit);
+    reasons.push(`(-${miss.toFixed(3)}) Genres rarely overlap with what you watch`);
+  }
+
+  if (moodSelected && b.mood_match < 0.5) {
+    const miss = WEIGHTS.mood_match * (1 - b.mood_match);
+    reasons.push(`(-${miss.toFixed(3)}) Doesn't match the selected mood`);
+  }
+
+  // Editorial closer based on which dimension is most missing
+  const dims = [
+    ["people overlap", b.people_overlap, WEIGHTS.people_overlap],
+    ["tone", b.tone_match, WEIGHTS.tone_match],
+    ["genre", b.genre_fit, WEIGHTS.genre_fit],
+  ];
+  dims.sort((a, x) => (x[2] * (1 - x[1])) - (a[2] * (1 - a[1])));
+  const worst = dims[0][0];
+  const imdb = rec.title.imdb_rating;
+  if (imdb !== null && imdb !== undefined && imdb < state.minRating + 0.5) {
+    reasons.push(`Below your average rating bar — and weak ${worst} signal makes it a blind spot`);
+  } else {
+    reasons.push(`A blind spot: weakest signal is ${worst}, outside your usual lane`);
+  }
+
+  return reasons.slice(0, 4);
 }
 
 function bindControls() {
@@ -325,6 +406,9 @@ function render() {
   const mood = [...state.mood];
   const recs = cands.map(c => scoreCandidate(c, seen, mood));
   recs.sort((a, b) => b.score - a.score);
+  if (state.mode === "anti") {
+    recs.reverse();
+  }
   const top = recs.slice(0, state.topN);
 
   const container = document.getElementById("results");
@@ -333,14 +417,17 @@ function render() {
     container.innerHTML = '<p class="empty">No candidates match these filters.</p>';
     return;
   }
+  const isAnti = state.mode === "anti";
   top.forEach((rec, i) => {
     const card = document.createElement("article");
-    card.className = "rec";
+    card.className = isAnti ? "rec anti" : "rec";
     const year = rec.title.year ? ` (${rec.title.year})` : "";
     const imdb = rec.title.imdb_rating
       ? `<span class="imdb">IMDb ${rec.title.imdb_rating}</span> · `
       : "";
     const kindBadge = rec.title.kind === "movie" ? '<span class="kind">movie</span>' : "";
+    const antiBadge = isAnti ? '<span class="anti-badge">blind spot</span>' : "";
+    const reasonsList = isAnti ? buildAntiReasons(rec) : rec.reasons;
     const themes = (rec.title.themes || []);
     const themesHtml = themes.length === 0 ? "" : `
       <div class="rec-themes">
@@ -361,7 +448,7 @@ function render() {
         }).join("")}
       </div>`;
     card.innerHTML = `
-      <h3><span class="rank">${i + 1}.</span>${escapeHtml(rec.title.name)}${year}${kindBadge}</h3>
+      <h3><span class="rank">${i + 1}.</span>${escapeHtml(rec.title.name)}${year}${kindBadge}${antiBadge}</h3>
       <div class="meta">${imdb}score ${rec.score.toFixed(3)}</div>
       <div class="bar"><div class="bar-fill" style="width:${(rec.score * 100).toFixed(1)}%"></div></div>
       <div class="breakdown">
@@ -373,7 +460,7 @@ function render() {
       ${narrHtml}
       ${themesHtml}
       <ul class="reasons">
-        ${rec.reasons.slice(0, 6).map(r => `<li>${escapeHtml(r)}</li>`).join("")}
+        ${reasonsList.slice(0, 6).map(r => `<li>${escapeHtml(r)}</li>`).join("")}
       </ul>
     `;
     container.appendChild(card);

@@ -151,14 +151,80 @@ function buildNodes(titles) {
 }
 
 function makeNodeTooltip(t) {
-  const lines = [];
   const year = t.year ? ` (${t.year})` : "";
-  lines.push(`<b>${escapeHtml(t.name)}${year}</b>`);
-  if (t.imdb_rating) lines.push(`IMDb ${t.imdb_rating}`);
-  lines.push(`${t.kind} · ${t.tone_tags.join(", ")}`);
-  if (t.loved) lines.push("★ loved");
+  const kindBadge = t.kind === "movie" ? "movie" : "tv";
+
+  // Narrative id -> label lookup
+  const narrLabels = new Map(
+    (state.data && state.data.narratives ? state.data.narratives : []).map(n => [n.id, n.label])
+  );
+  // Cluster id -> label lookup
+  const clusterLabel = (() => {
+    if (t.cluster_id === undefined || t.cluster_id === -1) return null;
+    const c = (state.data && state.data.clusters ? state.data.clusters : [])
+      .find(c => c.cluster_id === t.cluster_id);
+    return c ? c.label : null;
+  })();
+
   const div = document.createElement("div");
-  div.innerHTML = lines.join("<br>");
+  div.className = "node-tip";
+
+  // 1. Title line
+  const head = document.createElement("div");
+  head.className = "tip-head";
+  head.innerHTML =
+    `<b>${escapeHtml(t.name)}${escapeHtml(year)}</b>` +
+    ` <span class="tip-badge">${escapeHtml(kindBadge)}</span>`;
+  div.appendChild(head);
+
+  // 2. IMDb · ★ loved
+  if (t.imdb_rating || t.loved) {
+    const meta = document.createElement("div");
+    meta.className = "tip-line";
+    const bits = [];
+    if (t.imdb_rating) bits.push(`IMDb ${t.imdb_rating}`);
+    if (t.loved) bits.push("★ loved");
+    meta.textContent = bits.join(" · ");
+    div.appendChild(meta);
+  }
+
+  const addLabeled = (label, value) => {
+    if (!value) return;
+    const row = document.createElement("div");
+    row.className = "tip-line tip-row";
+    const lab = document.createElement("span");
+    lab.className = "tip-label";
+    lab.textContent = `${label}:`;
+    const val = document.createElement("span");
+    val.className = "tip-value";
+    val.textContent = value;
+    row.appendChild(lab);
+    row.appendChild(document.createTextNode(" "));
+    row.appendChild(val);
+    div.appendChild(row);
+  };
+
+  // 3. Tones
+  if (t.tone_tags && t.tone_tags.length) {
+    addLabeled("Tones", t.tone_tags.join(", "));
+  }
+
+  // 4. Narratives (top 3, mapped to labels)
+  if (t.narratives && t.narratives.length) {
+    const top = t.narratives.slice(0, 3).map(id => narrLabels.get(id) || id);
+    addLabeled("Narratives", top.join(", "));
+  }
+
+  // 5. Themes (top 4, already sorted by rarity)
+  if (t.themes && t.themes.length) {
+    addLabeled("Themes", t.themes.slice(0, 4).join(", "));
+  }
+
+  // 6. Cluster
+  if (clusterLabel) {
+    addLabeled("Cluster", clusterLabel);
+  }
+
   return div;
 }
 

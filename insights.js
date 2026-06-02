@@ -31,11 +31,19 @@ async function init() {
     FILMOGRAPHIES = null;
   }
   setSubtitle();
+  renderCritique();
   renderAuteurs();
   renderFilmography();
   renderHeatmap();
   bindHeatmapControls();
   renderContrarian();
+}
+
+/* Map narrative id -> human label. Falls back to the raw id. */
+function narrativeLabel(id) {
+  if (!DATA || !DATA.narratives) return id;
+  const found = DATA.narratives.find(n => n.id === id);
+  return found ? found.label : id;
 }
 
 function setSubtitle() {
@@ -49,7 +57,9 @@ function setSubtitle() {
 /* ====== Section 1: Hidden Auteurs ====== */
 function renderAuteurs() {
   const loved = DATA.titles.filter(t => t.loved);
-  // Map personId -> { name, roles:Set, titles:[] }
+  const seen = DATA.titles.filter(t => t.seen);
+
+  // Map personId -> { name, roles:Set, titles:[] (loved) }
   const map = new Map();
   for (const t of loved) {
     for (const p of t.people) {
@@ -63,6 +73,24 @@ function renderAuteurs() {
       entry.titles.push(t);
     }
   }
+
+  // Tally narratives across SEEN-appearance titles per person.
+  // Keyed by personId -> Map(narrativeId -> count).
+  const narrByPerson = new Map();
+  for (const t of seen) {
+    const ns = t.narratives || [];
+    if (ns.length === 0) continue;
+    const credited = new Set();
+    for (const p of t.people) {
+      if (!NON_ACTOR_ROLES.has(p.role)) continue;
+      if (credited.has(p.id)) continue;
+      credited.add(p.id);
+      let bucket = narrByPerson.get(p.id);
+      if (!bucket) { bucket = new Map(); narrByPerson.set(p.id, bucket); }
+      for (const n of ns) bucket.set(n, (bucket.get(n) || 0) + 1);
+    }
+  }
+
   const ranked = [...map.values()]
     .sort((a, b) => b.titles.length - a.titles.length || a.name.localeCompare(b.name))
     .slice(0, 25);
@@ -79,16 +107,225 @@ function renderAuteurs() {
     const chips = recent
       .map(t => `<span class="title-chip">${escapeHtml(t.name)}${t.year ? ` (${t.year})` : ""}</span>`)
       .join("");
+
+    // Top 3 narratives across seen-appearance titles.
+    const bucket = narrByPerson.get(a.id);
+    let narrBlock = "";
+    if (bucket && bucket.size > 0) {
+      const top3 = [...bucket.entries()]
+        .sort((x, y) => y[1] - x[1] || narrativeLabel(x[0]).localeCompare(narrativeLabel(y[0])))
+        .slice(0, 3);
+      const narrChips = top3
+        .map(([id, n]) => `<span class="narr-chip">${escapeHtml(narrativeLabel(id))} &times; ${n}</span>`)
+        .join("");
+      narrBlock = `<p class="auteur-narr-label">Dominant narratives</p>
+        <div class="narr-chips">${narrChips}</div>`;
+    }
+
     const card = document.createElement("article");
     card.className = "auteur-card";
     card.innerHTML = `
       <h3 class="auteur-name">${escapeHtml(a.name)}</h3>
       <div class="auteur-roles">${roleBadges}</div>
       <p class="auteur-count">Appears in <strong>${a.titles.length}</strong> of your loved titles</p>
+      ${narrBlock}
       <div class="title-chips">${chips}</div>
     `;
     grid.appendChild(card);
   }
+}
+
+/* ====== Section 0: Critique of Your Taste ====== */
+function renderCritique() {
+  const grid = document.getElementById("critique-grid");
+  if (!grid) return;
+
+  const titles = DATA.titles;
+  const seen = titles.filter(t => t.seen);
+  const loved = titles.filter(t => t.loved);
+  const lovedCount = loved.length || 1; // avoid div-by-zero
+
+  const cards = [];
+
+  // 1. Lane skew — tone counts across SEEN.
+  {
+    const counts = new Map();
+    for (const t of seen) for (const tag of (t.tone_tags || [])) {
+      counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+    const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    if (sorted.length >= 2) {
+      const [topTone, topN] = sorted[0];
+      const [botTone, botN] = sorted[sorted.length - 1];
+      const second = sorted[1];
+      const ratio = (topN / Math.max(1, second[1])).toFixed(1);
+      cards.push(critiqueCard(
+        "Lane skew",
+        `Your <strong>${escapeHtml(topTone)}</strong> lane (${topN}) is ${ratio}&times; your <strong>${escapeHtml(second[0])}</strong> lane (${second[1]}). Smallest lane: <strong>${escapeHtml(botTone)}</strong> (${botN}).`
+      ));
+    }
+  }
+
+  // 2. Era skew — loved titles per era.
+  {
+    const eras = [
+      { label: "pre-1990", min: 0,    max: 1989 },
+      { label: "1990s",    min: 1990, max: 1999 },
+      { label: "2000s",    min: 2000, max: 2009 },
+      { label: "2010s",    min: 2010, max: 2019 },
+      { label: "2020s",    min: 2020, max: 2099 },
+    ];
+    const counts = eras.map(e => ({
+      ...e,
+      n: loved.filter(t => t.year != null && t.year >= e.min && t.year <= e.max).length
+    }));
+    const sorted = [...counts].sort((a, b) => b.n - a.n);
+    const top = sorted[0];
+    const bottom = sorted[sorted.length - 1];
+    const breakdown = counts.map(c => `${c.label} ${c.n}`).join(" &middot; ");
+    cards.push(critiqueCard(
+      "Era skew",
+      `<strong>${escapeHtml(top.label)}</strong> dominates (${top.n} loved). Rarest era: <strong>${escapeHtml(bottom.label)}</strong> (${bottom.n}).<br><span class="critique-meta">${breakdown}</span>`
+    ));
+  }
+
+  // 3. Movies vs TV in loved.
+  {
+    const movies = loved.filter(t => t.kind === "movie").length;
+    const tv = loved.filter(t => t.kind === "tv").length;
+    cards.push(critiqueCard(
+      "Movies vs TV",
+      `Of your <strong>${lovedCount}</strong> loved, <strong>${movies}</strong> are movies and <strong>${tv}</strong> are TV.`
+    ));
+  }
+
+  // 4. Auteur dependency.
+  {
+    const map = new Map();
+    for (const t of loved) {
+      for (const p of t.people) {
+        if (!NON_ACTOR_ROLES.has(p.role)) continue;
+        let e = map.get(p.id);
+        if (!e) { e = { id: p.id, name: p.name, titles: new Set() }; map.set(p.id, e); }
+        e.titles.add(t.tmdb_id);
+      }
+    }
+    const top10 = [...map.values()].sort((a, b) => b.titles.size - a.titles.size).slice(0, 10);
+    const union = new Set();
+    for (const r of top10) for (const id of r.titles) union.add(id);
+    const pct = Math.round(100 * union.size / lovedCount);
+    cards.push(critiqueCard(
+      "Auteur dependency",
+      `<strong>${pct}%</strong> of your loved set (${union.size} of ${lovedCount}) is credited to one of the top 10 hidden auteurs in your network.`
+    ));
+  }
+
+  // 5. Most-tagged narrative in loved.
+  {
+    const counts = new Map();
+    for (const t of loved) for (const n of (t.narratives || [])) {
+      counts.set(n, (counts.get(n) || 0) + 1);
+    }
+    const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    if (sorted.length > 0) {
+      const [id, n] = sorted[0];
+      cards.push(critiqueCard(
+        "Most-loved narrative",
+        `Your most-loved narrative archetype is <strong>&ldquo;${escapeHtml(narrativeLabel(id))}&rdquo;</strong> (${n} titles).`
+      ));
+    }
+  }
+
+  // 6. Critical favorite vs contrarian floor.
+  {
+    const withRating = loved.filter(t => t.imdb_rating != null);
+    if (withRating.length > 0) {
+      const high = withRating.slice().sort((a, b) => b.imdb_rating - a.imdb_rating)[0];
+      const low = withRating.slice().sort((a, b) => a.imdb_rating - b.imdb_rating)[0];
+      cards.push(critiqueCard(
+        "Critical floor and ceiling",
+        `Highest-rated love: <strong>${escapeHtml(high.name)}</strong> (${high.imdb_rating.toFixed(1)}). Lowest-rated love: <strong>${escapeHtml(low.name)}</strong> (${low.imdb_rating.toFixed(1)}) &mdash; your most contrarian pick.`
+      ));
+    }
+  }
+
+  // 7. Cluster concentration — top 3 loved clusters (excludes noise -1).
+  {
+    const labelOf = new Map((DATA.clusters || []).map(c => [c.cluster_id, c.label]));
+    const counts = new Map();
+    for (const t of loved) {
+      const cid = t.cluster_id;
+      if (cid == null || !labelOf.has(cid)) continue;
+      counts.set(cid, (counts.get(cid) || 0) + 1);
+    }
+    const top3 = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+    if (top3.length >= 1) {
+      const parts = top3.map(([cid, n]) => `<strong>${escapeHtml(labelOf.get(cid))}</strong> (${n})`);
+      cards.push(critiqueCard(
+        "Cluster concentration",
+        `Top Louvain clusters by loved members: ${parts.join(", ")}.`
+      ));
+    }
+  }
+
+  // 8. Kind imbalance per tone in loved.
+  {
+    const toneKind = new Map();
+    for (const t of loved) {
+      for (const tag of (t.tone_tags || [])) {
+        let k = toneKind.get(tag);
+        if (!k) { k = { movie: 0, tv: 0 }; toneKind.set(tag, k); }
+        if (t.kind === "movie") k.movie += 1;
+        else if (t.kind === "tv") k.tv += 1;
+      }
+    }
+    // Pick the most TV-skewed and most movie-skewed tones (require >= 5 titles).
+    const ratios = [...toneKind.entries()]
+      .map(([tone, k]) => ({ tone, k, total: k.movie + k.tv, tvPct: k.movie + k.tv ? k.tv / (k.movie + k.tv) : 0 }))
+      .filter(x => x.total >= 5);
+    if (ratios.length >= 2) {
+      const tvLean = ratios.slice().sort((a, b) => b.tvPct - a.tvPct)[0];
+      const movieLean = ratios.slice().sort((a, b) => a.tvPct - b.tvPct)[0];
+      cards.push(critiqueCard(
+        "Kind imbalance per tone",
+        `<strong>${escapeHtml(tvLean.tone)}</strong> is ${Math.round(tvLean.tvPct * 100)}% TV-loved. <strong>${escapeHtml(movieLean.tone)}</strong> is ${Math.round((1 - movieLean.tvPct) * 100)}% movie-loved.`
+      ));
+    }
+  }
+
+  // 9. Time travel index.
+  {
+    const tt = loved.filter(t => {
+      const ns = t.narratives || [];
+      const th = t.themes || [];
+      return ns.includes("time-as-prison") || ns.includes("time-as-redemption") || th.includes("time travel");
+    }).length;
+    const pct = (100 * tt / lovedCount).toFixed(1);
+    cards.push(critiqueCard(
+      "Time-travel index",
+      `You loved <strong>${tt}</strong> time-travel adjacent titles. That&rsquo;s <strong>${pct}%</strong> of your loved set.`
+    ));
+  }
+
+  // 10. Freudian closer.
+  {
+    const freud = new Set(["ego-dissolution", "return-of-the-repressed", "the-double", "memory-as-weapon"]);
+    const n = loved.filter(t => (t.narratives || []).some(x => freud.has(x))).length;
+    const pct = (100 * n / lovedCount).toFixed(1);
+    cards.push(critiqueCard(
+      "Structure of the self",
+      `Your taste skews psychoanalytic: <strong>${n}</strong> loved titles (${pct}%) wrestle with identity, memory, or the divided self.`
+    ));
+  }
+
+  grid.innerHTML = cards.join("");
+}
+
+function critiqueCard(title, bodyHtml) {
+  return `<article class="critique-card">
+    <h3 class="critique-title">${escapeHtml(title)}</h3>
+    <p class="critique-body">${bodyHtml}</p>
+  </article>`;
 }
 
 /* ====== Section 2: Filmography Completion ====== */
