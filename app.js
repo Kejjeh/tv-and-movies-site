@@ -259,10 +259,18 @@ function buildAntiReasons(rec) {
     reasons.push(`(-${miss.toFixed(3)}) Doesn't match the selected mood`);
   }
 
+  if (b.narrative_match === 0) {
+    reasons.push(`(-${WEIGHTS.narrative_match.toFixed(3)}) No shared narrative archetypes`);
+  } else if (b.narrative_match < 0.25) {
+    const miss = WEIGHTS.narrative_match * (1 - b.narrative_match);
+    reasons.push(`(-${miss.toFixed(3)}) Narrative archetypes barely overlap with your set`);
+  }
+
   // Editorial closer based on which dimension is most missing
   const dims = [
     ["people overlap", b.people_overlap, WEIGHTS.people_overlap],
     ["tone", b.tone_match, WEIGHTS.tone_match],
+    ["narrative", b.narrative_match, WEIGHTS.narrative_match],
     ["genre", b.genre_fit, WEIGHTS.genre_fit],
   ];
   dims.sort((a, x) => (x[2] * (1 - x[1])) - (a[2] * (1 - a[1])));
@@ -296,11 +304,12 @@ function roleWeight(role) {
   return ROLE_WEIGHTS[role] ?? 1.0;
 }
 
-/* Mirrors loved_weighted_overlap + _fraction + _mood_score in brain/scoring.py */
+/* Mirrors loved_weighted_overlap + _fraction + _mood_score + narrative_match in brain/scoring.py */
 function scoreCandidate(cand, seen, mood) {
   const personToSeen = new Map();
   const seenTones = new Set();
   const seenGenres = new Set();
+  const seenNarratives = new Set();
   for (const t of seen) {
     for (const p of t.people) {
       if (!personToSeen.has(p.id)) personToSeen.set(p.id, []);
@@ -308,6 +317,7 @@ function scoreCandidate(cand, seen, mood) {
     }
     for (const tag of t.tone_tags) seenTones.add(tag);
     for (const g of t.genres) seenGenres.add(g);
+    for (const n of (t.narratives || [])) seenNarratives.add(n);
   }
 
   // people_overlap, love-weighted
@@ -337,17 +347,24 @@ function scoreCandidate(cand, seen, mood) {
     moodMatch = moodMatched.length / mood.length;
   }
 
+  // narrative_match
+  const candNarratives = cand.narratives || [];
+  const sharedNarratives = candNarratives.filter(n => seenNarratives.has(n));
+  const narrativeMatch = candNarratives.length > 0 ? sharedNarratives.length / candNarratives.length : 0;
+
   const breakdown = {
     tone_match: toneMatch,
     people_overlap: peopleOverlap,
     genre_fit: genreFit,
     mood_match: moodMatch,
+    narrative_match: narrativeMatch,
   };
   const total =
     WEIGHTS.tone_match * toneMatch +
     WEIGHTS.people_overlap * peopleOverlap +
     WEIGHTS.genre_fit * genreFit +
-    WEIGHTS.mood_match * moodMatch;
+    WEIGHTS.mood_match * moodMatch +
+    WEIGHTS.narrative_match * narrativeMatch;
 
   // reasons sorted by contribution
   const pairs = [];
@@ -370,6 +387,15 @@ function scoreCandidate(cand, seen, mood) {
   if (moodMatched.length > 0) {
     const c = moodMatched.length / mood.length * WEIGHTS.mood_match;
     pairs.push([c, `Mood match: ${[...moodMatched].sort().join(", ")}`]);
+  }
+  if (sharedNarratives.length > 0) {
+    const c = sharedNarratives.length / candNarratives.length * WEIGHTS.narrative_match;
+    // Map narrative ids to labels via DATA.narratives
+    const narrLabels = new Map((DATA.narratives || []).map(n => [n.id, n.label]));
+    const labels = sharedNarratives.slice().sort().map(id => narrLabels.get(id) || id);
+    const shown = labels.slice(0, 3).join(", ");
+    const more = labels.length > 3 ? ` (+${labels.length - 3} more)` : "";
+    pairs.push([c, `Narrative match: ${shown}${more}`]);
   }
   pairs.sort((a, b) => b[0] - a[0]);
   const reasons = pairs.map(([c, t]) => `(+${c.toFixed(3)}) ${t}`);
@@ -454,6 +480,7 @@ function render() {
       <div class="breakdown">
         tone ${rec.breakdown.tone_match.toFixed(2)} ·
         people ${rec.breakdown.people_overlap.toFixed(2)} ·
+        narrative ${rec.breakdown.narrative_match.toFixed(2)} ·
         genre ${rec.breakdown.genre_fit.toFixed(2)} ·
         mood ${rec.breakdown.mood_match.toFixed(2)}
       </div>
