@@ -150,14 +150,32 @@ function renderGraph(works) {
   const container = document.getElementById("discovery-graph");
   if (state.network) state.network.destroy();
   state.network = new vis.Network(container, { nodes, edges }, {
-    nodes: { shape: "dot", scaling: { min: 6, max: 28 }, font: { color: "#e8eaed", size: 11 } },
-    edges: { smooth: false, scaling: { min: 0.5, max: 4 } },
-    physics: {
-      forceAtlas2Based: { gravitationalConstant: -50, springLength: 120 },
-      solver: "forceAtlas2Based",
-      stabilization: { iterations: 200 },
+    nodes: {
+      shape: "dot",
+      scaling: { min: 6, max: 28 },
+      font: { color: "#e8eaed", size: 11 },
+      borderWidth: 1,
     },
-    interaction: { hover: true, tooltipDelay: 200 },
+    edges: { smooth: false, width: 1, scaling: { min: 0.5, max: 4 } },
+    // Mirrors the working Graph page: barnesHut + bounded stabilization +
+    // physics turned OFF afterwards so the canvas doesn't keep spinning.
+    physics: {
+      barnesHut: {
+        gravitationalConstant: -18000,
+        springLength: 280,
+        springConstant: 0.006,
+        damping: 0.32,
+        centralGravity: 0.06,
+        avoidOverlap: 0.6,
+      },
+      maxVelocity: 50,
+      stabilization: { iterations: 400 },
+    },
+    interaction: { hover: true, tooltipDelay: 200, keyboard: { enabled: false } },
+  });
+  state.network.once("stabilizationIterationsDone", () => {
+    state.network.setOptions({ physics: { enabled: false } });
+    state.network.fit({ animation: { duration: 400 } });
   });
 }
 

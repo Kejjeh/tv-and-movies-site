@@ -1,24 +1,27 @@
+/* Mirror the working Graph page: full-viewport grid that sizes the
+   canvas to the available height (so the network has a real box to
+   stabilise into) and overrides the global `main` cap. */
 #discovery-shell {
   display: grid;
   grid-template-columns: 240px 1fr;
-  gap: 1.25rem;
-  padding: 1rem 1.25rem 2rem;
-  max-width: none;          /* span the full viewport */
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  max-width: none;
   margin: 0;
+  height: calc(100vh - 100px);
 }
 
-/* The page uses a <main> element; the global stylesheet caps `main`
-   at 1100px, which strangles the graph. Override here so Discovery
-   gets the full available width. */
 main#discovery-main {
   display: block;
   max-width: none;
   padding: 0;
   margin: 0;
+  min-width: 0;            /* let the grid track shrink so canvas resizes */
+  height: 100%;
 }
 
 @media (max-width: 900px) {
-  #discovery-shell { grid-template-columns: 1fr; }
+  #discovery-shell { grid-template-columns: 1fr; height: auto; }
 }
 
 #discovery-controls {
@@ -50,8 +53,9 @@ main#discovery-main {
   border-radius: 8px;
   border: 1px solid var(--border);
   width: 100%;
-  height: calc(100vh - 180px);
-  min-height: 640px;
+  height: 100%;
+  min-height: 600px;
+  overflow: hidden;
 }
 
 #discovery-list {
@@ -59,7 +63,7 @@ main#discovery-main {
   border-radius: 8px;
   border: 1px solid var(--border);
   padding: 0.5rem;
-  max-height: 80vh;
+  height: 100%;
   overflow-y: auto;
 }
 
