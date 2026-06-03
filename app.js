@@ -4,6 +4,15 @@
 
 const TONES = ["cerebral", "dystopian", "paranoid", "antihero", "animation-dark", "surreal"];
 
+const STATUS_MULTIPLIER = {
+  loved:    2.0,
+  liked:    1.5,
+  ok:       1.0,
+  started:  0.7,
+  disliked: -0.3,
+  hated:    -0.6,
+};
+
 let DATA = null;
 let WEIGHTS = null;
 let ROLE_WEIGHTS = null;
@@ -320,18 +329,24 @@ function scoreCandidate(cand, seen, mood) {
     for (const n of (t.narratives || [])) seenNarratives.add(n);
   }
 
-  // people_overlap, love-weighted
+  // people_overlap, rating-weighted: each candidate person picks up the
+  // status multiplier of the strongest-reacted seen title they appear in
+  // (largest absolute value). Hated/disliked produce negative pull.
   let totalW = 0, matchedW = 0;
   for (const p of cand.people) {
     const w = roleWeight(p.role);
     totalW += w;
     const sources = personToSeen.get(p.id);
     if (sources && sources.length > 0) {
-      const loveFactor = sources.some(t => t.loved) ? 2.0 : 1.0;
-      matchedW += w * loveFactor;
+      let best = 0;
+      for (const t of sources) {
+        const m = STATUS_MULTIPLIER[t.status || "ok"] ?? 1.0;
+        if (Math.abs(m) > Math.abs(best)) best = m;
+      }
+      matchedW += w * best;
     }
   }
-  const peopleOverlap = totalW > 0 ? Math.min(1.0, matchedW / totalW) : 0;
+  const peopleOverlap = totalW > 0 ? Math.max(0, Math.min(1.0, matchedW / totalW)) : 0;
 
   // tone, genre
   const sharedTones = cand.tone_tags.filter(t => seenTones.has(t));
@@ -452,6 +467,9 @@ function render() {
       ? `<span class="imdb">IMDb ${rec.title.imdb_rating}</span> · `
       : "";
     const kindBadge = rec.title.kind === "movie" ? '<span class="kind">movie</span>' : "";
+    const statusBadge = rec.title.status && rec.title.status !== "ok"
+      ? `<span class="status-badge status-${rec.title.status}">${rec.title.status}</span>`
+      : "";
     const antiBadge = isAnti ? '<span class="anti-badge">blind spot</span>' : "";
     const reasonsList = isAnti ? buildAntiReasons(rec) : rec.reasons;
     const themes = (rec.title.themes || []);
@@ -474,7 +492,7 @@ function render() {
         }).join("")}
       </div>`;
     card.innerHTML = `
-      <h3><span class="rank">${i + 1}.</span>${escapeHtml(rec.title.name)}${year}${kindBadge}${antiBadge}</h3>
+      <h3><span class="rank">${i + 1}.</span>${escapeHtml(rec.title.name)}${year}${kindBadge}${statusBadge}${antiBadge}</h3>
       <div class="meta">${imdb}score ${rec.score.toFixed(3)}</div>
       <div class="bar"><div class="bar-fill" style="width:${(rec.score * 100).toFixed(1)}%"></div></div>
       <div class="breakdown">

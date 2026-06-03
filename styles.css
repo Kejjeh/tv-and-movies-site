@@ -302,6 +302,23 @@ input[type=range] {
   opacity: 0.7;
 }
 
+.status-badge {
+  display: inline-block;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-radius: 4px;
+  padding: 0.1rem 0.45rem;
+  margin-left: 0.4rem;
+  vertical-align: middle;
+  font-weight: 700;
+}
+.status-loved    { background: #ff8aa6; color: #2a0d18; }
+.status-liked    { background: #8ab4f8; color: #0d1320; }
+.status-started  { background: #5dd6c4; color: #052420; }
+.status-disliked { background: #6b5b3a; color: #f3e4ba; }
+.status-hated    { background: #5c2932; color: #f9d1d8; }
+
 .anti-badge {
   display: inline-block;
   font-size: 0.65rem;
