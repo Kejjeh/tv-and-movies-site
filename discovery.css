@@ -1,10 +1,20 @@
 #discovery-shell {
   display: grid;
-  grid-template-columns: 260px 1fr;
-  gap: 1.5rem;
-  padding: 1rem 1.5rem 2rem;
-  max-width: 1600px;
-  margin: 0 auto;
+  grid-template-columns: 240px 1fr;
+  gap: 1.25rem;
+  padding: 1rem 1.25rem 2rem;
+  max-width: none;          /* span the full viewport */
+  margin: 0;
+}
+
+/* The page uses a <main> element; the global stylesheet caps `main`
+   at 1100px, which strangles the graph. Override here so Discovery
+   gets the full available width. */
+main#discovery-main {
+  display: block;
+  max-width: none;
+  padding: 0;
+  margin: 0;
 }
 
 @media (max-width: 900px) {
@@ -39,8 +49,9 @@
   background: var(--surface);
   border-radius: 8px;
   border: 1px solid var(--border);
-  height: 80vh;
-  min-height: 600px;
+  width: 100%;
+  height: calc(100vh - 180px);
+  min-height: 640px;
 }
 
 #discovery-list {
