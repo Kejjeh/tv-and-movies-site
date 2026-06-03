@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Discovery · TV &amp; Movies Brain</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="graph.css">
+  <link rel="stylesheet" href="discovery.css">
+  <script src="https://unpkg.com/vis-network@9.1.10/standalone/umd/vis-network.min.js"></script>
+</head>
+<body class="graph-page">
+  <header>
+    <div class="header-row">
+      <h1>TV &amp; Movies Brain</h1>
+      <nav>
+        <a href="index.html">Recommendations</a>
+        <a href="graph.html">Graph</a>
+        <a href="insights.html">Insights</a>
+        <a href="discovery.html" class="active">Discovery</a>
+      </nav>
+    </div>
+    <p class="subtitle" id="subtitle">
+      Filmography web of everyone in your brain &mdash;
+      <strong>not your taste profile.</strong> Use this to find new things,
+      not to judge what you&rsquo;ve already seen.
+    </p>
+  </header>
+
+  <div id="discovery-shell">
+    <aside id="discovery-controls">
+      <h2>View</h2>
+      <div class="chip-row">
+        <button class="chip active" data-view="graph">Graph</button>
+        <button class="chip" data-view="list">List</button>
+      </div>
+
+      <h2>Min. of your people <span class="hint" id="people-val">2</span></h2>
+      <input type="range" id="min-people" min="1" max="10" value="2" step="1">
+
+      <h2>Min. TMDb votes <span class="hint" id="votes-val">100</span></h2>
+      <input type="range" id="min-votes" min="0" max="2000" value="100" step="50">
+
+      <h2>Min. TMDb rating <span class="hint" id="rating-val">7.0</span></h2>
+      <input type="range" id="min-rating" min="0" max="9" value="7" step="0.5">
+
+      <h2>Kind</h2>
+      <div class="chip-row">
+        <button class="chip active" data-kind="all">all</button>
+        <button class="chip" data-kind="tv">TV</button>
+        <button class="chip" data-kind="movie">movies</button>
+      </div>
+
+      <h2>Show</h2>
+      <div class="chip-row" id="status-filters">
+        <button class="chip active" data-status="unseen">unseen</button>
+        <button class="chip active" data-status="candidate">candidate</button>
+        <button class="chip active" data-status="ok">seen</button>
+        <button class="chip active" data-status="started">started</button>
+        <button class="chip active" data-status="liked">liked</button>
+        <button class="chip active" data-status="loved">loved</button>
+      </div>
+
+      <p class="updated" id="counts"></p>
+    </aside>
+
+    <main id="discovery-main">
+      <div id="discovery-graph"></div>
+      <div id="discovery-list" hidden></div>
+    </main>
+  </div>
+
+  <script src="discovery.js"></script>
+</body>
+</html>
