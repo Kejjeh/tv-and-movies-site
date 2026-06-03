@@ -5,7 +5,7 @@
 const TONES = ["cerebral", "dystopian", "paranoid", "antihero", "animation-dark", "surreal"];
 
 const STATUS_MULTIPLIER = {
-  loved:    2.0,
+  loved:    4.0,
   liked:    1.5,
   ok:       1.0,
   started:  0.7,
