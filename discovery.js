@@ -173,10 +173,19 @@ function renderGraph(works) {
     },
     interaction: { hover: true, tooltipDelay: 200, keyboard: { enabled: false } },
   });
-  state.network.once("stabilizationIterationsDone", () => {
+  // Freeze the network as soon as stabilization completes so the
+  // canvas stops re-measuring its container (which on this layout
+  // caused unbounded scrollbar growth). Two events fire — guard so
+  // we only touch options once per render.
+  let frozen = false;
+  const freeze = () => {
+    if (frozen || !state.network) return;
+    frozen = true;
     state.network.setOptions({ physics: { enabled: false } });
-    state.network.fit({ animation: { duration: 400 } });
-  });
+    state.network.fit();      // no animation — would re-trigger resize ticks
+  };
+  state.network.once("stabilizationIterationsDone", freeze);
+  state.network.once("stabilized", freeze);
 }
 
 function renderList(works) {
