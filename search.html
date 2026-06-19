@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Search &mdash; TV &amp; Movies Brain</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div class="header-row">
+      <h1>TV &amp; Movies Brain</h1>
+      <nav>
+        <a href="index.html">Recommendations</a>
+        <a href="graph.html">Graph</a>
+        <a href="insights.html">Insights</a>
+        <a href="discovery.html">Discovery</a>
+        <a href="search.html" class="active">Search</a>
+      </nav>
+      <div id="auth" class="auth"></div>
+    </div>
+    <p class="subtitle">Look up anything in your catalogue by title or by a person in the credits.</p>
+  </header>
+
+  <main class="search-layout">
+    <aside id="search-filters">
+      <h2>Filters</h2>
+
+      <label class="f-label" for="filter-kind">Kind</label>
+      <select id="filter-kind">
+        <option value="">Any</option>
+        <option value="tv">TV</option>
+        <option value="movie">Movie</option>
+      </select>
+
+      <label class="f-label" for="filter-status">Your status</label>
+      <select id="filter-status">
+        <option value="">Any</option>
+      </select>
+
+      <label class="f-label" for="filter-role">Credited role</label>
+      <select id="filter-role">
+        <option value="">Any</option>
+      </select>
+
+      <label class="f-label">Year</label>
+      <div class="year-row">
+        <input type="number" id="filter-year-min" placeholder="from" min="1900" max="2100">
+        <span>&ndash;</span>
+        <input type="number" id="filter-year-max" placeholder="to" min="1900" max="2100">
+      </div>
+
+      <label class="f-label">IMDb rating</label>
+      <div class="year-row">
+        <input type="number" id="filter-rating-min" placeholder="min" min="0" max="10" step="0.1">
+        <span>&ndash;</span>
+        <input type="number" id="filter-rating-max" placeholder="max" min="0" max="10" step="0.1">
+      </div>
+
+      <hr class="f-sep">
+
+      <label class="f-label" for="filter-genre">Genre</label>
+      <select id="filter-genre"><option value="">Any</option></select>
+
+      <label class="f-label" for="filter-tone">Tone</label>
+      <select id="filter-tone"><option value="">Any</option></select>
+
+      <label class="f-label" for="filter-theme">Theme</label>
+      <select id="filter-theme"><option value="">Any</option></select>
+
+      <label class="f-label" for="filter-narrative">Narrative</label>
+      <select id="filter-narrative"><option value="">Any</option></select>
+
+      <button id="filter-reset" class="auth-btn">Reset filters</button>
+    </aside>
+
+    <section id="search-main">
+      <div class="search-mode" id="search-mode">
+        <button class="mode-btn active" data-mode="catalogue">Your catalogue</button>
+        <button class="mode-btn" data-mode="universe">Whole universe</button>
+      </div>
+      <input type="search" id="search-input" placeholder="Title or person&hellip; (e.g. &ldquo;Gilligan&rdquo;)" autocomplete="off">
+      <p id="search-count" class="search-count"></p>
+      <div id="search-results"></div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script src="status-store.js"></script>
+  <script src="ui.js"></script>
+  <script src="tmdb-config.js"></script>
+  <script src="tmdb-search.js"></script>
+  <script src="search.js"></script>
+</body>
+</html>

@@ -33,13 +33,20 @@
     return (map && map[key] != null) ? map[key] : fallback;
   }
 
-  const UI = { escapeHtml, formatYear, narrativeLabel, colorFor };
+  // Capitalise the first letter of each word (hyphen counts as a boundary):
+  // "animation-dark" -> "Animation-Dark".
+  function titleCase(s) {
+    return String(s || "").replace(/\b\w/g, c => c.toUpperCase());
+  }
+
+  const UI = { escapeHtml, formatYear, narrativeLabel, colorFor, titleCase };
 
   // Browser globals (classic scripts).
   global.escapeHtml = escapeHtml;
   global.formatYear = formatYear;
   global.narrativeLabel = narrativeLabel;
   global.colorFor = colorFor;
+  global.titleCase = titleCase;
   global.UI = UI;
 
   // Node / test harness.
