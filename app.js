@@ -4,7 +4,9 @@
 
 const TONES = ["cerebral", "dystopian", "paranoid", "antihero", "animation-dark", "surreal"];
 
-const STATUS_MULTIPLIER = {
+// Fallback only — the real values are shipped in data.json (single source of
+// truth in brain/scoring.py) and read in load().
+const STATUS_MULTIPLIER_FALLBACK = {
   loved:    4.0,
   liked:    1.5,
   ok:       1.0,
@@ -16,6 +18,28 @@ const STATUS_MULTIPLIER = {
 let DATA = null;
 let WEIGHTS = null;
 let ROLE_WEIGHTS = null;
+let STATUS_MULTIPLIER = null;
+
+// Status editing (Supabase). RAW_TITLES is the shipped data.json titles;
+// DATA.titles = applyStatuses(RAW_TITLES, STATUS_MAP) so edits re-merge cleanly.
+let RAW_TITLES = [];
+let STATUS_MAP = new Map();
+let loggedIn = false;
+// Buttons offered per card. "ok" reads as "seen" (watched, no strong reaction).
+const STATUS_CHOICES = [
+  ["loved", "loved"], ["liked", "liked"], ["ok", "seen"],
+  ["started", "started"], ["disliked", "disliked"], ["hated", "hated"],
+];
+
+// Bundle the scoring parameters for scorer.js (see web/scorer.js).
+function scoringParams() {
+  return {
+    weights: WEIGHTS,
+    role_weights: ROLE_WEIGHTS,
+    status_multipliers: STATUS_MULTIPLIER,
+    narratives: DATA.narratives,
+  };
+}
 
 const state = {
   mood: new Set(),
@@ -38,6 +62,9 @@ async function load() {
   DATA = await r.json();
   WEIGHTS = DATA.weights;
   ROLE_WEIGHTS = DATA.role_weights;
+  STATUS_MULTIPLIER = DATA.status_multipliers || STATUS_MULTIPLIER_FALLBACK;
+  RAW_TITLES = DATA.titles;
+  await initStatuses();   // merge stored statuses over the shipped titles
   buildLaneChips();
   buildMoodChips();
   buildThemeChips();
@@ -47,7 +74,84 @@ async function load() {
   bindControls();
   setSubtitle();
   setUpdated();
+  document.getElementById("results").addEventListener("click", onStatusClick);
   render();
+}
+
+/* ====== Status editing (Supabase) ====== */
+
+async function initStatuses() {
+  if (!window.StatusStore || !window.SUPABASE_URL) return;
+  try {
+    const sb = StatusStore.init(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    // Re-merge + refresh the auth bar whenever login state changes
+    // (e.g. when the magic-link redirect lands).
+    sb.auth.onAuthStateChange(() => { refreshAuthUI(); reloadStatuses(); });
+    STATUS_MAP = await StatusStore.loadStatuses();
+    DATA.titles = StatusStore.applyStatuses(RAW_TITLES, STATUS_MAP);
+  } catch (e) {
+    console.warn("status load failed:", e);
+  }
+  await refreshAuthUI();
+}
+
+async function reloadStatuses() {
+  try {
+    STATUS_MAP = await StatusStore.loadStatuses();
+    DATA.titles = StatusStore.applyStatuses(RAW_TITLES, STATUS_MAP);
+    render();
+  } catch (_) {}
+}
+
+async function refreshAuthUI() {
+  const el = document.getElementById("auth");
+  if (!el || !window.StatusStore) return;
+  let user = null;
+  try { user = await StatusStore.currentUser(); } catch (_) {}
+  loggedIn = !!user;
+  if (loggedIn) {
+    el.innerHTML = `<span class="auth-who">${escapeHtml(user.email)}</span>` +
+      `<button class="auth-btn" id="logout">log out</button>`;
+    document.getElementById("logout").onclick = async () => {
+      await StatusStore.signOut();
+      loggedIn = false;
+      refreshAuthUI();
+    };
+  } else {
+    el.innerHTML = `<button class="auth-btn" id="login">log in to edit</button>`;
+    document.getElementById("login").onclick = async () => {
+      const email = prompt("Email for a one-time login link:");
+      if (!email) return;
+      try {
+        await StatusStore.signIn(email.trim());
+        alert("Check your email for the login link, then come back.");
+      } catch (e) {
+        alert("Could not send login link: " + (e.message || e));
+      }
+    };
+  }
+}
+
+async function markStatus(tmdbId, kind, status) {
+  if (!loggedIn) {
+    alert("Log in (top right) to save your ratings.");
+    return;
+  }
+  STATUS_MAP.set(StatusStore.statusKey(tmdbId, kind), status);
+  DATA.titles = StatusStore.applyStatuses(RAW_TITLES, STATUS_MAP);
+  render();  // optimistic — the marked title leaves the candidate list
+  try {
+    await StatusStore.setStatus(tmdbId, kind, status);
+  } catch (e) {
+    alert("Save failed: " + (e.message || e));
+  }
+}
+
+function onStatusClick(e) {
+  const btn = e.target.closest(".status-btn");
+  if (!btn) return;
+  const wrap = btn.closest(".status-actions");
+  markStatus(Number(wrap.dataset.tmdb), wrap.dataset.kind, btn.dataset.status);
 }
 
 function buildNarrativeChips() {
@@ -309,114 +413,9 @@ function bindControls() {
   };
 }
 
-function roleWeight(role) {
-  return ROLE_WEIGHTS[role] ?? 1.0;
-}
-
-/* Mirrors loved_weighted_overlap + _fraction + _mood_score + narrative_match in brain/scoring.py */
-function scoreCandidate(cand, seen, mood) {
-  const personToSeen = new Map();
-  const seenTones = new Set();
-  const seenGenres = new Set();
-  const seenNarratives = new Set();
-  for (const t of seen) {
-    for (const p of t.people) {
-      if (!personToSeen.has(p.id)) personToSeen.set(p.id, []);
-      personToSeen.get(p.id).push(t);
-    }
-    for (const tag of t.tone_tags) seenTones.add(tag);
-    for (const g of t.genres) seenGenres.add(g);
-    for (const n of (t.narratives || [])) seenNarratives.add(n);
-  }
-
-  // people_overlap, rating-weighted: each candidate person picks up the
-  // status multiplier of the strongest-reacted seen title they appear in
-  // (largest absolute value). Hated/disliked produce negative pull.
-  let totalW = 0, matchedW = 0;
-  for (const p of cand.people) {
-    const w = roleWeight(p.role);
-    totalW += w;
-    const sources = personToSeen.get(p.id);
-    if (sources && sources.length > 0) {
-      let best = 0;
-      for (const t of sources) {
-        const m = STATUS_MULTIPLIER[t.status || "ok"] ?? 1.0;
-        if (Math.abs(m) > Math.abs(best)) best = m;
-      }
-      matchedW += w * best;
-    }
-  }
-  const peopleOverlap = totalW > 0 ? Math.max(0, Math.min(1.0, matchedW / totalW)) : 0;
-
-  // tone, genre
-  const sharedTones = cand.tone_tags.filter(t => seenTones.has(t));
-  const toneMatch = cand.tone_tags.length > 0 ? sharedTones.length / cand.tone_tags.length : 0;
-  const sharedGenres = cand.genres.filter(g => seenGenres.has(g));
-  const genreFit = cand.genres.length > 0 ? sharedGenres.length / cand.genres.length : 0;
-
-  // mood
-  let moodMatch = 0.5;
-  let moodMatched = [];
-  if (mood.length > 0) {
-    moodMatched = mood.filter(m => cand.tone_tags.includes(m));
-    moodMatch = moodMatched.length / mood.length;
-  }
-
-  // narrative_match
-  const candNarratives = cand.narratives || [];
-  const sharedNarratives = candNarratives.filter(n => seenNarratives.has(n));
-  const narrativeMatch = candNarratives.length > 0 ? sharedNarratives.length / candNarratives.length : 0;
-
-  const breakdown = {
-    tone_match: toneMatch,
-    people_overlap: peopleOverlap,
-    genre_fit: genreFit,
-    mood_match: moodMatch,
-    narrative_match: narrativeMatch,
-  };
-  const total =
-    WEIGHTS.tone_match * toneMatch +
-    WEIGHTS.people_overlap * peopleOverlap +
-    WEIGHTS.genre_fit * genreFit +
-    WEIGHTS.mood_match * moodMatch +
-    WEIGHTS.narrative_match * narrativeMatch;
-
-  // reasons sorted by contribution
-  const pairs = [];
-  const totalPeopleW = cand.people.reduce((s, p) => s + roleWeight(p.role), 0);
-  for (const p of cand.people) {
-    const sources = personToSeen.get(p.id);
-    if (!sources || sources.length === 0) continue;
-    const contrib = totalPeopleW > 0 ? roleWeight(p.role) / totalPeopleW * WEIGHTS.people_overlap : 0;
-    const names = sources.map(t => t.name).join(", ");
-    pairs.push([contrib, `Shares ${p.name} (${p.role}) with ${names}`]);
-  }
-  if (sharedTones.length > 0) {
-    const c = sharedTones.length / cand.tone_tags.length * WEIGHTS.tone_match;
-    pairs.push([c, `Tone match: ${[...sharedTones].sort().join(", ")}`]);
-  }
-  if (sharedGenres.length > 0) {
-    const c = sharedGenres.length / cand.genres.length * WEIGHTS.genre_fit;
-    pairs.push([c, `Shared genres: ${[...sharedGenres].sort().join(", ")}`]);
-  }
-  if (moodMatched.length > 0) {
-    const c = moodMatched.length / mood.length * WEIGHTS.mood_match;
-    pairs.push([c, `Mood match: ${[...moodMatched].sort().join(", ")}`]);
-  }
-  if (sharedNarratives.length > 0) {
-    const c = sharedNarratives.length / candNarratives.length * WEIGHTS.narrative_match;
-    // Map narrative ids to labels via DATA.narratives
-    const narrLabels = new Map((DATA.narratives || []).map(n => [n.id, n.label]));
-    const labels = sharedNarratives.slice().sort().map(id => narrLabels.get(id) || id);
-    const shown = labels.slice(0, 3).join(", ");
-    const more = labels.length > 3 ? ` (+${labels.length - 3} more)` : "";
-    pairs.push([c, `Narrative match: ${shown}${more}`]);
-  }
-  pairs.sort((a, b) => b[0] - a[0]);
-  const reasons = pairs.map(([c, t]) => `(+${c.toFixed(3)}) ${t}`);
-
-  return { title: cand, score: total, breakdown, reasons };
-}
+/* scoreCandidate is provided by scorer.js (loaded first) — the single JS
+   scorer, pinned to brain/scoring.py by tests/fixtures/scoring_parity.json.
+   We call it with scoringParams() so the constants come from data.json. */
 
 function render() {
   if (!DATA) return;
@@ -445,7 +444,9 @@ function render() {
   }
 
   const mood = [...state.mood];
-  const recs = cands.map(c => scoreCandidate(c, seen, mood));
+  const params = scoringParams();
+  const profile = buildProfile(seen);  // derive the seen-graph once, not per candidate
+  const recs = cands.map(c => scoreCandidate(c, profile, mood, params));
   recs.sort((a, b) => b.score - a.score);
   if (state.mode === "anti") {
     recs.reverse();
@@ -507,15 +508,16 @@ function render() {
       <ul class="reasons">
         ${reasonsList.slice(0, 6).map(r => `<li>${escapeHtml(r)}</li>`).join("")}
       </ul>
+      <div class="status-actions" data-tmdb="${rec.title.tmdb_id}" data-kind="${rec.title.kind}">
+        <span class="status-actions-label">I've seen this:</span>
+        ${STATUS_CHOICES.map(([s, label]) =>
+          `<button class="status-btn status-${s}" data-status="${s}">${label}</button>`).join("")}
+      </div>
     `;
     container.appendChild(card);
   });
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-  }[c]));
-}
+/* escapeHtml is provided by ui.js (loaded first). */
 
 load();

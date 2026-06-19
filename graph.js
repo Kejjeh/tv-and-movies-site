@@ -39,27 +39,11 @@ const state = {
 async function load() {
   const r = await fetch("data.json");
   state.data = await r.json();
-  state.peopleIndex = buildPeopleIndex(state.data.titles);
+  // peopleIndex (seen) comes from the shared taste profile (taste-profile.js).
+  state.peopleIndex = buildProfile(state.data.titles).peopleIndex;
   setSubtitle();
   bindControls();
   render();
-}
-
-function buildPeopleIndex(titles) {
-  const idx = new Map();
-  for (const t of titles) {
-    if (!t.seen) continue;
-    for (const p of t.people) {
-      let entry = idx.get(p.id);
-      if (!entry) {
-        entry = { id: p.id, name: p.name, roles: new Map(), titles: [] };
-        idx.set(p.id, entry);
-      }
-      entry.roles.set(p.role, (entry.roles.get(p.role) || 0) + 1);
-      entry.titles.push({ title: t, role: p.role });
-    }
-  }
-  return idx;
 }
 
 function setSubtitle() {
@@ -649,10 +633,6 @@ function showPerson(personId) {
   document.getElementById("details").classList.remove("hidden");
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
-  );
-}
+/* escapeHtml is provided by ui.js (loaded first). */
 
 load();

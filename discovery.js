@@ -219,8 +219,6 @@ function tooltip(w) {
   const top = w.credits.slice(0, 8).map(c => `${c.person_name} (${c.role})`).join("\n");
   return `${w.name} (${w.year || "?"})\n${w.status} · TMDb ${(w.vote_average || 0).toFixed(1)}\n\n${top}`;
 }
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
-}
+/* escapeHtml is provided by ui.js (loaded first). */
 
 init();

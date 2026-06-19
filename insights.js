@@ -59,20 +59,13 @@ function renderAuteurs() {
   const loved = DATA.titles.filter(t => t.loved);
   const seen = DATA.titles.filter(t => t.seen);
 
-  // Map personId -> { name, roles:Set, titles:[] (loved) }
-  const map = new Map();
-  for (const t of loved) {
-    for (const p of t.people) {
-      if (!NON_ACTOR_ROLES.has(p.role)) continue;
-      let entry = map.get(p.id);
-      if (!entry) {
-        entry = { id: p.id, name: p.name, roles: new Set(), titles: [] };
-        map.set(p.id, entry);
-      }
-      entry.roles.add(p.role);
-      entry.titles.push(t);
-    }
-  }
+  // Person index over loved titles, restricted to creative (non-actor) roles.
+  // indexPeople is the shared primitive from taste-profile.js; entries carry a
+  // role->count map and one {title, role} record per credited appearance.
+  const lovedCrew = loved.map(t => ({
+    ...t, people: t.people.filter(p => NON_ACTOR_ROLES.has(p.role)),
+  }));
+  const map = indexPeople(lovedCrew);
 
   // Tally narratives across SEEN-appearance titles per person.
   // Keyed by personId -> Map(narrativeId -> count).
@@ -91,17 +84,20 @@ function renderAuteurs() {
     }
   }
 
+  // Collapse each person's multi-role credits to the distinct loved titles
+  // they appear in, then rank by that count.
   const ranked = [...map.values()]
+    .map(a => ({ id: a.id, name: a.name, roles: a.roles, titles: distinctTitles(a) }))
     .sort((a, b) => b.titles.length - a.titles.length || a.name.localeCompare(b.name))
     .slice(0, 25);
 
   const grid = document.getElementById("auteurs-grid");
   grid.innerHTML = "";
   for (const a of ranked) {
-    const recent = [...a.titles]
+    const recent = a.titles.slice()
       .sort((x, y) => (y.year || 0) - (x.year || 0))
       .slice(0, 5);
-    const roleBadges = [...a.roles].sort()
+    const roleBadges = [...a.roles.keys()].sort()
       .map(r => `<span class="role-badge">${escapeHtml(r)}</span>`)
       .join("");
     const chips = recent
@@ -129,6 +125,7 @@ function renderAuteurs() {
       <div class="auteur-roles">${roleBadges}</div>
       <p class="auteur-count">Appears in <strong>${a.titles.length}</strong> of your loved titles</p>
       ${narrBlock}
+      <p class="auteur-narr-label">Loved titles</p>
       <div class="title-chips">${chips}</div>
     `;
     grid.appendChild(card);
@@ -518,10 +515,6 @@ function renderContrarianRow(t) {
 }
 
 /* ====== Utilities ====== */
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-  }[c]));
-}
+/* escapeHtml is provided by ui.js (loaded first). */
 
 init();

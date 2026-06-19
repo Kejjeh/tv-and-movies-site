@@ -332,3 +332,46 @@ input[type=range] {
   vertical-align: middle;
   font-weight: 700;
 }
+
+/* ====== Auth bar + status editing ====== */
+.auth {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.auth-who { font-size: 0.85rem; opacity: 0.8; }
+.auth-btn {
+  background: #2a2f3a;
+  color: #e8eaed;
+  border: 1px solid #444a5a;
+  border-radius: 6px;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.auth-btn:hover { background: #353b48; }
+
+.status-actions {
+  margin-top: 0.8rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+.status-actions-label { font-size: 0.8rem; opacity: 0.6; margin-right: 0.2rem; }
+.status-btn {
+  border: 1px solid #444a5a;
+  background: #20242c;
+  color: #cfd3da;
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.status-btn:hover { background: #2c3947; border-color: #8ab4f8; }
+.status-btn.status-loved:hover    { background: #5a2a36; border-color: #ff8aa6; }
+.status-btn.status-liked:hover    { background: #2d3d5a; border-color: #8ab4f8; }
+.status-btn.status-disliked:hover,
+.status-btn.status-hated:hover    { background: #4a2a2a; border-color: #e06b6b; }
