@@ -54,6 +54,14 @@
     if (error) throw error;
   }
 
+  // Queue a universe title for the reconcile job to ingest into brain.db.
+  async function queueAdd(tmdbId, kind, name) {
+    const { error } = await client
+      .from("queue")
+      .upsert({ tmdb_id: tmdbId, kind, name, requested_at: new Date().toISOString() });
+    if (error) throw error;
+  }
+
   // ---- Auth (magic link) ----------------------------------------------
   async function signIn(email) {
     const { error } = await client.auth.signInWithOtp({
@@ -74,7 +82,7 @@
 
   const API = {
     statusKey, applyStatuses,
-    init, loadStatuses, setStatus, clearStatus,
+    init, loadStatuses, setStatus, clearStatus, queueAdd,
     signIn, signOut, currentUser,
   };
   global.StatusStore = API;

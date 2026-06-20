@@ -25,6 +25,7 @@
   <main class="search-layout">
     <aside id="search-filters">
       <h2>Filters</h2>
+      <p class="universe-note">Universe search uses <strong>Kind</strong> and <strong>Year (from)</strong>; the rest filter your catalogue.</p>
 
       <label class="f-label" for="filter-kind">Kind</label>
       <select id="filter-kind">
@@ -70,6 +71,10 @@
 
       <label class="f-label" for="filter-narrative">Narrative</label>
       <select id="filter-narrative"><option value="">Any</option></select>
+
+      <label class="f-label" for="filter-people">People (all of)</label>
+      <select id="filter-people" multiple size="6"></select>
+      <span class="f-hint">Ctrl/Cmd-click for several</span>
 
       <button id="filter-reset" class="auth-btn">Reset filters</button>
     </aside>

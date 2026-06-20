@@ -411,6 +411,10 @@ main.search-layout { max-width: 1500px; }
 .year-row { display: flex; align-items: center; gap: 0.4rem; }
 .year-row span { opacity: 0.5; }
 .f-sep { border: none; border-top: 1px solid #262b35; margin: 1.1rem 0 0.2rem; }
+#search-filters select[multiple] { height: auto; padding: 0.2rem; }
+.f-hint { display: block; font-size: 0.68rem; opacity: 0.45; margin-top: 0.2rem; }
+.universe-note { display: none; font-size: 0.78rem; opacity: 0.7; line-height: 1.4; margin: 0 0 0.6rem; }
+#search-filters.universe .universe-note { display: block; }
 #filter-reset { width: 100%; margin-top: 1rem; }
 .search-count { opacity: 0.55; font-size: 0.85rem; margin: 0 0 0.8rem 0.2rem; }
 #search-input {
@@ -465,3 +469,9 @@ main.search-layout { max-width: 1500px; }
 .mode-btn + .mode-btn { border-left: 1px solid #444a5a; }
 .mode-btn.active { background: #2d3d5a; color: #fff; }
 .uni-overview { margin: 0.4rem 0 0; font-size: 0.85rem; opacity: 0.7; line-height: 1.4; }
+.queue-btn {
+  border: 1px solid #3a6a4a; background: #1c2a20; color: #9fe0b0;
+  border-radius: 999px; padding: 0.25rem 0.8rem; font-size: 0.8rem; cursor: pointer;
+}
+.queue-btn:hover { background: #243a2a; border-color: #7ee787; }
+.queue-btn:disabled { opacity: 0.7; cursor: default; }

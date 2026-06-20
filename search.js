@@ -16,7 +16,8 @@
     const hasNarrowing = q || filters.kind || filters.status ||
       filters.yearMin != null || filters.yearMax != null || filters.role ||
       filters.genre || filters.tone || filters.theme || filters.narrative ||
-      filters.ratingMin != null || filters.ratingMax != null;
+      filters.ratingMin != null || filters.ratingMax != null ||
+      (filters.people && filters.people.length);
     if (!hasNarrowing) return [];
 
     const results = [];
@@ -26,6 +27,8 @@
       if (filters.yearMin != null && !(t.year >= filters.yearMin)) continue;
       if (filters.yearMax != null && !(t.year <= filters.yearMax)) continue;
       if (filters.role && !(t.people || []).some(p => p.role === filters.role)) continue;
+      if (filters.people && filters.people.length &&
+          !filters.people.every(n => (t.people || []).some(p => p.name === n))) continue;
       if (filters.genre && !(t.genres || []).includes(filters.genre)) continue;
       if (filters.tone && !(t.tone_tags || []).includes(filters.tone)) continue;
       if (filters.theme && !(t.themes || []).includes(filters.theme)) continue;
@@ -132,9 +135,13 @@
   function populateOptions(titles, narrativesMeta) {
     const statuses = new Set(), roles = new Set(), genres = new Set();
     const tones = new Set(), themes = new Set();
+    const personCount = new Map();
     for (const t of titles) {
       if (t.status) statuses.add(t.status);
-      for (const p of (t.people || [])) roles.add(p.role);
+      for (const p of (t.people || [])) {
+        roles.add(p.role);
+        personCount.set(p.name, (personCount.get(p.name) || 0) + 1);
+      }
       for (const g of (t.genres || [])) genres.add(g);
       for (const tg of (t.tone_tags || [])) tones.add(tg);
       for (const th of (t.themes || [])) themes.add(th);
@@ -144,6 +151,9 @@
     fillSelect("filter-genre", [...genres].sort());
     fillSelect("filter-tone", [...tones].sort());
     fillSelect("filter-theme", [...themes].sort());
+    // People who recur (2+ titles) keep the list usable.
+    const people = [...personCount.entries()].filter(([, n]) => n >= 2).map(([name]) => name).sort();
+    fillSelect("filter-people", people);
     // narratives: option value = id, label = human label
     const narrSel = document.getElementById("filter-narrative");
     for (const n of (narrativesMeta || []).slice().sort((a, b) => (a.label || "").localeCompare(b.label || ""))) {
@@ -170,6 +180,7 @@
       yearMax: num("filter-year-max"),
       ratingMin: num("filter-rating-min"),
       ratingMax: num("filter-rating-max"),
+      people: [...document.getElementById("filter-people").selectedOptions].map(o => o.value),
     };
   }
 
@@ -192,11 +203,14 @@
         ? `<div class="creds"><span class="cred hit">via ${global.escapeHtml(r.via.join(", "))}</span></div>` : "";
       const overview = r.overview
         ? `<p class="uni-overview">${global.escapeHtml(r.overview.slice(0, 240))}${r.overview.length > 240 ? "…" : ""}</p>` : "";
+      const add = r.inSet ? "" :
+        `<div class="status-actions"><button class="queue-btn" data-tmdb="${r.tmdb_id}" ` +
+        `data-kind="${global.escapeHtml(r.kind)}" data-name="${global.escapeHtml(r.name)}">+ Add to brain</button></div>`;
       const card = document.createElement("article");
       card.className = "search-result";
       card.innerHTML =
         `<h3>${global.escapeHtml(r.name)}${fmtYear(r.year)}` +
-        `<span class="kind">${global.titleCase(r.kind)}</span>${badge}</h3>${via}${overview}`;
+        `<span class="kind">${global.titleCase(r.kind)}</span>${badge}</h3>${via}${overview}${add}`;
       container.appendChild(card);
     }
   }
@@ -208,7 +222,7 @@
     if (!input || !out) return;
     const FILTER_IDS = ["filter-kind", "filter-status", "filter-role", "filter-genre",
       "filter-tone", "filter-theme", "filter-narrative", "filter-year-min", "filter-year-max",
-      "filter-rating-min", "filter-rating-max"];
+      "filter-rating-min", "filter-rating-max", "filter-people"];
     let titles = [];
     try {
       const r = await fetch("data.json");
@@ -243,7 +257,9 @@
       if (!q) { count.textContent = ""; renderUniverse(out, [], ""); return; }
       count.textContent = "searching TMDb…";
       try {
-        const results = await searchTmdb(q, knownKeys);
+        const kind = document.getElementById("filter-kind").value || null;
+        const year = document.getElementById("filter-year-min").value || null;
+        const results = await searchTmdb(q, knownKeys, { kind, year });
         count.textContent = `${results.length} TMDb result${results.length === 1 ? "" : "s"}`;
         renderUniverse(out, results, q);
       } catch (e) {
@@ -314,11 +330,27 @@
       catch (e) { alert("Save failed: " + (e.message || e)); }
     }
 
+    async function queueAdd(btn) {
+      if (!loggedIn) { alert("Log in (top right) to add titles."); return; }
+      btn.disabled = true;
+      try {
+        await StatusStore.queueAdd(Number(btn.dataset.tmdb), btn.dataset.kind, btn.dataset.name);
+        btn.textContent = "Queued ✓";
+      } catch (e) {
+        btn.disabled = false;
+        alert("Could not queue: " + (e.message || e));
+      }
+    }
+
     out.addEventListener("click", e => {
-      const btn = e.target.closest(".status-btn");
-      if (!btn) return;
-      const wrap = btn.closest(".status-actions");
-      markStatus(Number(wrap.dataset.tmdb), wrap.dataset.kind, btn.dataset.status);
+      const statusBtn = e.target.closest(".status-btn");
+      if (statusBtn) {
+        const wrap = statusBtn.closest(".status-actions");
+        markStatus(Number(wrap.dataset.tmdb), wrap.dataset.kind, statusBtn.dataset.status);
+        return;
+      }
+      const qBtn = e.target.closest(".queue-btn");
+      if (qBtn) queueAdd(qBtn);
     });
 
     document.querySelectorAll("#search-mode .mode-btn").forEach(btn => {
@@ -326,8 +358,9 @@
         document.querySelectorAll("#search-mode .mode-btn").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
         mode = btn.dataset.mode;
-        // filters only narrow your catalogue; dim them in universe mode
-        document.getElementById("search-filters").style.opacity = mode === "universe" ? "0.4" : "";
+        // In universe mode only Kind + the first Year box filter TMDb-side;
+        // mark the catalogue-only controls so it's clear.
+        document.getElementById("search-filters").classList.toggle("universe", mode === "universe");
         run();
       });
     });
@@ -337,7 +370,11 @@
       el.addEventListener("change", run);
     });
     document.getElementById("filter-reset").addEventListener("click", () => {
-      FILTER_IDS.forEach(id => { document.getElementById(id).value = ""; });
+      FILTER_IDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (el.multiple) [...el.options].forEach(o => { o.selected = false; });
+        else el.value = "";
+      });
       input.value = "";
       run();
     });
