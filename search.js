@@ -182,14 +182,12 @@
     };
   }
 
-  function renderUniverse(container, results, query) {
+  function renderUniverse(container, results, active) {
     container.innerHTML = "";
-    if (!query.trim()) {
-      container.innerHTML = '<p class="search-hint">Search the whole TMDb universe by title or person.</p>';
-      return;
-    }
     if (results.length === 0) {
-      container.innerHTML = `<p class="search-hint">No TMDb matches for &ldquo;${global.escapeHtml(query)}&rdquo;.</p>`;
+      container.innerHTML = active
+        ? '<p class="search-hint">No TMDb matches.</p>'
+        : '<p class="search-hint">Search the whole TMDb universe by title or person — or pick a Kind (+ Year) to browse.</p>';
       return;
     }
     const fmtYear = global.formatYear || (y => (y ? ` (${y})` : ""));
@@ -252,14 +250,15 @@
 
     const runUniverse = async () => {
       const q = input.value.trim();
-      if (!q) { count.textContent = ""; renderUniverse(out, [], ""); return; }
+      const kind = document.getElementById("filter-kind").value || null;
+      const year = document.getElementById("filter-year-min").value || null;
+      // Need either text, or a Kind to browse (TMDb can't list "everything").
+      if (!q && !kind) { count.textContent = ""; renderUniverse(out, [], false); return; }
       count.textContent = "searching TMDb…";
       try {
-        const kind = document.getElementById("filter-kind").value || null;
-        const year = document.getElementById("filter-year-min").value || null;
         const results = await searchTmdb(q, knownKeys, { kind, year });
         count.textContent = `${results.length} TMDb result${results.length === 1 ? "" : "s"}`;
-        renderUniverse(out, results, q);
+        renderUniverse(out, results, true);
       } catch (e) {
         count.textContent = "";
         out.innerHTML = `<p class="search-hint">TMDb error: ${global.escapeHtml(e.message || String(e))}</p>`;

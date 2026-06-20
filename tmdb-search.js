@@ -66,35 +66,52 @@
     return acc.out;
   }
 
+  // Choose the TMDb endpoint. opts: { kind: "movie"|"tv", year }.
+  //   text + kind  -> /search/{kind} (year-filtered)
+  //   text, no kind -> /search/multi
+  //   no text + kind -> /discover/{kind} (browse by year/popularity)
+  //   no text, no kind -> null (nothing to search)
+  // Returns { url, typed } where typed is the kind to normalize as, or null.
+  function tmdbSearchUrl(query, key, opts) {
+    opts = opts || {};
+    const q = (query || "").trim();
+    const kind = (opts.kind === "movie" || opts.kind === "tv") ? opts.kind : null;
+    const base = "https://api.themoviedb.org/3";
+    const apiKey = `&api_key=${encodeURIComponent(key)}`;
+    const yearParam = kind === "movie" ? "primary_release_year" : "first_air_date_year";
+    const yearBit = (kind && opts.year) ? `&${yearParam}=${encodeURIComponent(opts.year)}` : "";
+
+    if (q && kind) {
+      return { url: `${base}/search/${kind}?include_adult=false${apiKey}&query=${encodeURIComponent(q)}${yearBit}`, typed: kind };
+    }
+    if (q) {
+      return { url: `${base}/search/multi?include_adult=false${apiKey}&query=${encodeURIComponent(q)}`, typed: null };
+    }
+    if (kind) {
+      return { url: `${base}/discover/${kind}?include_adult=false&sort_by=popularity.desc${apiKey}${yearBit}`, typed: kind };
+    }
+    return null;
+  }
+
   // ---- Browser fetch ----------------------------------------------------
-  // opts: { kind: "movie"|"tv", year } — when kind is set, use the typed
-  // endpoint so TMDb filters by kind (and year) server-side; otherwise multi.
   async function searchTmdb(query, knownKeys, opts) {
     const key = global.TMDB_API_KEY;
     if (!key) throw new Error("TMDB_API_KEY not configured");
-    opts = opts || {};
-    const base = "https://api.themoviedb.org/3";
-    let url, typed = null;
-    if (opts.kind === "movie" || opts.kind === "tv") {
-      typed = opts.kind;
-      const yearParam = opts.kind === "movie" ? "primary_release_year" : "first_air_date_year";
-      url = `${base}/search/${opts.kind}?include_adult=false` +
-        `&api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(query)}` +
-        (opts.year ? `&${yearParam}=${encodeURIComponent(opts.year)}` : "");
-    } else {
-      url = `${base}/search/multi?include_adult=false` +
-        `&api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(query)}`;
-    }
-    const resp = await fetch(url);
+    const choice = tmdbSearchUrl(query, key, opts);
+    if (!choice) return [];
+    const resp = await fetch(choice.url);
     if (!resp.ok) throw new Error(`TMDb ${resp.status}`);
     const json = await resp.json();
-    return typed ? normalizeTyped(json, typed, knownKeys) : normalizeMulti(json, knownKeys);
+    return choice.typed
+      ? normalizeTyped(json, choice.typed, knownKeys)
+      : normalizeMulti(json, knownKeys);
   }
 
   global.normalizeMulti = normalizeMulti;
   global.normalizeTyped = normalizeTyped;
+  global.tmdbSearchUrl = tmdbSearchUrl;
   global.searchTmdb = searchTmdb;
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { normalizeMulti, normalizeTyped, searchTmdb };
+    module.exports = { normalizeMulti, normalizeTyped, tmdbSearchUrl, searchTmdb };
   }
 })(typeof globalThis !== "undefined" ? globalThis : this);
