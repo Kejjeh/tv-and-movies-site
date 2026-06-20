@@ -62,6 +62,14 @@
     if (error) throw error;
   }
 
+  // Fire the GitHub reconcile workflow via the "reconcile" Edge Function. The
+  // user's session is passed automatically; the GitHub token stays server-side.
+  async function triggerReconcile() {
+    const { data, error } = await client.functions.invoke("reconcile", { body: {} });
+    if (error) throw error;
+    return data;
+  }
+
   // ---- Auth (magic link) ----------------------------------------------
   async function signIn(email) {
     const { error } = await client.auth.signInWithOtp({
@@ -82,7 +90,7 @@
 
   const API = {
     statusKey, applyStatuses,
-    init, loadStatuses, setStatus, clearStatus, queueAdd,
+    init, loadStatuses, setStatus, clearStatus, queueAdd, triggerReconcile,
     signIn, signOut, currentUser,
   };
   global.StatusStore = API;

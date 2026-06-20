@@ -285,9 +285,20 @@
       loggedIn = !!user;
       if (loggedIn) {
         el.innerHTML = `<span class="auth-who">${global.escapeHtml(user.email)}</span>` +
+          `<button class="auth-btn" id="reconcile">Reconcile now</button>` +
           `<button class="auth-btn" id="logout">Log out</button>`;
         document.getElementById("logout").onclick = async () => {
           await StatusStore.signOut(); loggedIn = false; refreshAuthUI();
+        };
+        document.getElementById("reconcile").onclick = async (e) => {
+          const b = e.target; b.disabled = true; b.textContent = "Reconciling…";
+          try {
+            await StatusStore.triggerReconcile();
+            b.textContent = "Reconcile queued ✓";
+          } catch (err) {
+            b.disabled = false; b.textContent = "Reconcile now";
+            alert("Could not start reconcile: " + (err.message || err));
+          }
         };
       } else {
         el.innerHTML = `<button class="auth-btn" id="login">Log in to rate</button>`;
