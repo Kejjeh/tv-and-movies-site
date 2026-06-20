@@ -89,14 +89,12 @@
       escPart(name.slice(i, i + q.length)) + "</mark>" + escPart(name.slice(i + q.length));
   }
 
-  function renderResults(container, results, query) {
+  function renderResults(container, results, query, active) {
     container.innerHTML = "";
-    if (!query.trim()) {
-      container.innerHTML = '<p class="search-hint">Search your catalogue by title or by anyone in the credits.</p>';
-      return;
-    }
     if (results.length === 0) {
-      container.innerHTML = `<p class="search-hint">No titles match &ldquo;${global.escapeHtml(query)}&rdquo;.</p>`;
+      container.innerHTML = active
+        ? '<p class="search-hint">No titles match these filters.</p>'
+        : '<p class="search-hint">Search your catalogue by title or by anyone in the credits — or pick filters on the left.</p>';
       return;
     }
     const fmtYear = global.formatYear || (y => (y ? ` (${y})` : ""));
@@ -249,7 +247,7 @@
       const results = searchCatalog(titles, filters);
       const active = filters.query.trim() || FILTER_IDS.some(id => document.getElementById(id).value);
       count.textContent = active ? `${results.length} result${results.length === 1 ? "" : "s"}` : "";
-      renderResults(out, results, filters.query);
+      renderResults(out, results, filters.query, active);
     };
 
     const runUniverse = async () => {
