@@ -35,6 +35,8 @@
           overview: o.overview || "",
           inSet: knownKeys.has(key),
           via: via ? [via] : [],
+          voteAverage: (o.vote_average != null) ? o.vote_average : null,
+          genreIds: o.genre_ids || [],
         };
         byKey.set(key, entry);
         out.push(entry);
@@ -66,6 +68,24 @@
     return acc.out;
   }
 
+  // Client-side narrowing of universe results by the filters TMDb metadata can
+  // honour: year range, rating range (vote average), and genre ids. Results
+  // missing a value drop out when the matching filter is set.
+  function postFilterUniverse(results, f) {
+    f = f || {};
+    return results.filter(r => {
+      if ((f.yearMin != null || f.yearMax != null) && r.year == null) return false;
+      if (f.yearMin != null && r.year < f.yearMin) return false;
+      if (f.yearMax != null && r.year > f.yearMax) return false;
+      if ((f.ratingMin != null || f.ratingMax != null) && r.voteAverage == null) return false;
+      if (f.ratingMin != null && r.voteAverage < f.ratingMin) return false;
+      if (f.ratingMax != null && r.voteAverage > f.ratingMax) return false;
+      if (f.genreIds && f.genreIds.length &&
+          !f.genreIds.some(id => (r.genreIds || []).includes(id))) return false;
+      return true;
+    });
+  }
+
   // Choose the TMDb endpoint. opts: { kind: "movie"|"tv", year }.
   //   text + kind  -> /search/{kind} (year-filtered)
   //   text, no kind -> /search/multi
@@ -78,40 +98,93 @@
     const kind = (opts.kind === "movie" || opts.kind === "tv") ? opts.kind : null;
     const base = "https://api.themoviedb.org/3";
     const apiKey = `&api_key=${encodeURIComponent(key)}`;
+    const pageBit = opts.page ? `&page=${encodeURIComponent(opts.page)}` : "";
     const yearParam = kind === "movie" ? "primary_release_year" : "first_air_date_year";
     const yearBit = (kind && opts.year) ? `&${yearParam}=${encodeURIComponent(opts.year)}` : "";
 
     if (q && kind) {
-      return { url: `${base}/search/${kind}?include_adult=false${apiKey}&query=${encodeURIComponent(q)}${yearBit}`, typed: kind };
+      return { url: `${base}/search/${kind}?include_adult=false${apiKey}&query=${encodeURIComponent(q)}${yearBit}${pageBit}`, typed: kind };
     }
     if (q) {
-      return { url: `${base}/search/multi?include_adult=false${apiKey}&query=${encodeURIComponent(q)}`, typed: null };
+      return { url: `${base}/search/multi?include_adult=false${apiKey}&query=${encodeURIComponent(q)}${pageBit}`, typed: null };
     }
     if (kind) {
-      return { url: `${base}/discover/${kind}?include_adult=false&sort_by=popularity.desc${apiKey}${yearBit}`, typed: kind };
+      const d = opts.disc || {};
+      const dateGte = kind === "movie" ? "release_date.gte" : "first_air_date.gte";
+      const dateLte = kind === "movie" ? "release_date.lte" : "first_air_date.lte";
+      let bits = "";
+      if (d.genreId != null) bits += `&with_genres=${encodeURIComponent(d.genreId)}`;
+      if (d.ratingMin != null) bits += `&vote_average.gte=${encodeURIComponent(d.ratingMin)}`;
+      if (d.ratingMax != null) bits += `&vote_average.lte=${encodeURIComponent(d.ratingMax)}`;
+      if (d.yearMin != null) bits += `&${dateGte}=${encodeURIComponent(d.yearMin)}-01-01`;
+      if (d.yearMax != null) bits += `&${dateLte}=${encodeURIComponent(d.yearMax)}-12-31`;
+      return { url: `${base}/discover/${kind}?include_adult=false&sort_by=popularity.desc${apiKey}${bits}${pageBit}`, typed: kind };
     }
     return null;
   }
 
   // ---- Browser fetch ----------------------------------------------------
+  // Returns { results, page, totalPages } (results normalized + post-filtered).
   async function searchTmdb(query, knownKeys, opts) {
     const key = global.TMDB_API_KEY;
     if (!key) throw new Error("TMDB_API_KEY not configured");
+    opts = opts || {};
     const choice = tmdbSearchUrl(query, key, opts);
-    if (!choice) return [];
+    if (!choice) return { results: [], page: 0, totalPages: 0 };
     const resp = await fetch(choice.url);
     if (!resp.ok) throw new Error(`TMDb ${resp.status}`);
     const json = await resp.json();
-    return choice.typed
+    const normalized = choice.typed
       ? normalizeTyped(json, choice.typed, knownKeys)
       : normalizeMulti(json, knownKeys);
+    return {
+      results: postFilterUniverse(normalized, opts.filters),
+      page: json.page || 1,
+      totalPages: json.total_pages || 1,
+    };
+  }
+
+  // TMDb genre lists differ for movie vs tv; fetch both once and cache as
+  // per-kind name->id maps.
+  let genreMaps = null;  // { movie: Map(nameLower->id), tv: Map(...) }
+  async function loadGenreMaps() {
+    if (genreMaps) return genreMaps;
+    const key = global.TMDB_API_KEY;
+    const maps = { movie: new Map(), tv: new Map() };
+    for (const kind of ["movie", "tv"]) {
+      try {
+        const r = await fetch(`https://api.themoviedb.org/3/genre/${kind}/list?api_key=${encodeURIComponent(key)}`);
+        const j = await r.json();
+        for (const g of (j.genres || [])) maps[kind].set(g.name.toLowerCase(), g.id);
+      } catch (_) { /* leave partial */ }
+    }
+    genreMaps = maps;
+    return maps;
+  }
+
+  // All ids a genre name maps to across both kinds (for client-side filtering).
+  async function genreIdsFor(name) {
+    if (!name) return [];
+    const m = await loadGenreMaps();
+    const k = name.toLowerCase();
+    return [m.movie.get(k), m.tv.get(k)].filter(id => id != null);
+  }
+
+  // The id for a genre name within one kind (for server-side /discover).
+  async function genreIdFor(name, kind) {
+    if (!name || (kind !== "movie" && kind !== "tv")) return null;
+    const m = await loadGenreMaps();
+    return m[kind].get(name.toLowerCase()) ?? null;
   }
 
   global.normalizeMulti = normalizeMulti;
   global.normalizeTyped = normalizeTyped;
+  global.postFilterUniverse = postFilterUniverse;
   global.tmdbSearchUrl = tmdbSearchUrl;
   global.searchTmdb = searchTmdb;
+  global.genreIdsFor = genreIdsFor;
+  global.genreIdFor = genreIdFor;
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { normalizeMulti, normalizeTyped, tmdbSearchUrl, searchTmdb };
+    module.exports = { normalizeMulti, normalizeTyped, postFilterUniverse, tmdbSearchUrl, searchTmdb };
   }
 })(typeof globalThis !== "undefined" ? globalThis : this);

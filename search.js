@@ -182,12 +182,17 @@
     };
   }
 
-  function renderUniverse(container, results, active) {
+  function renderUniverse(container, results, active, hasMore) {
     container.innerHTML = "";
     if (results.length === 0) {
       container.innerHTML = active
-        ? '<p class="search-hint">No TMDb matches.</p>'
-        : '<p class="search-hint">Search the whole TMDb universe by title or person — or pick a Kind (+ Year) to browse.</p>';
+        ? '<p class="search-hint">No matches on this page' + (hasMore ? ' — try Load more.' : '. Loosen the filters.') + '</p>'
+        : '<p class="search-hint">Search the whole TMDb universe by title or person — or pick a Kind (+ filters) to browse.</p>';
+      if (active && hasMore) {
+        const more = document.createElement("button");
+        more.id = "uni-more"; more.className = "auth-btn uni-more"; more.textContent = "Load more";
+        container.appendChild(more);
+      }
       return;
     }
     const fmtYear = global.formatYear || (y => (y ? ` (${y})` : ""));
@@ -208,6 +213,13 @@
         `<h3>${global.escapeHtml(r.name)}${fmtYear(r.year)}` +
         `<span class="kind">${global.titleCase(r.kind)}</span>${badge}</h3>${via}${overview}${add}`;
       container.appendChild(card);
+    }
+    if (hasMore) {
+      const more = document.createElement("button");
+      more.id = "uni-more";
+      more.className = "auth-btn uni-more";
+      more.textContent = "Load more";
+      container.appendChild(more);
     }
   }
 
@@ -248,17 +260,35 @@
       renderResults(out, results, filters.query, active);
     };
 
-    const runUniverse = async () => {
+    // Universe pagination state.
+    let uniResults = [], uniPage = 0, uniTotalPages = 0;
+
+    const runUniverse = async (append) => {
       const q = input.value.trim();
       const kind = document.getElementById("filter-kind").value || null;
-      const year = document.getElementById("filter-year-min").value || null;
       // Need either text, or a Kind to browse (TMDb can't list "everything").
-      if (!q && !kind) { count.textContent = ""; renderUniverse(out, [], false); return; }
+      if (!q && !kind) { count.textContent = ""; uniResults = []; renderUniverse(out, [], false); return; }
+      const num = id => { const v = document.getElementById(id).value; return v === "" ? null : Number(v); };
+      const genreName = document.getElementById("filter-genre").value || null;
+      const filters = {
+        yearMin: num("filter-year-min"), yearMax: num("filter-year-max"),
+        ratingMin: num("filter-rating-min"), ratingMax: num("filter-rating-max"),
+        genreIds: genreName ? await global.genreIdsFor(genreName) : [],
+      };
+      // Server-side /discover params (browse path) — TMDb filters before paging.
+      const disc = {
+        genreId: (genreName && kind) ? await global.genreIdFor(genreName, kind) : null,
+        ratingMin: filters.ratingMin, ratingMax: filters.ratingMax,
+        yearMin: filters.yearMin, yearMax: filters.yearMax,
+      };
+      const page = append ? uniPage + 1 : 1;
       count.textContent = "searching TMDb…";
       try {
-        const results = await searchTmdb(q, knownKeys, { kind, year });
-        count.textContent = `${results.length} TMDb result${results.length === 1 ? "" : "s"}`;
-        renderUniverse(out, results, true);
+        const res = await searchTmdb(q, knownKeys, { kind, page, filters, disc });
+        uniResults = append ? uniResults.concat(res.results) : res.results;
+        uniPage = res.page; uniTotalPages = res.totalPages;
+        count.textContent = `${uniResults.length} shown${uniPage < uniTotalPages ? ` · page ${uniPage}/${uniTotalPages}` : ""}`;
+        renderUniverse(out, uniResults, true, uniPage < uniTotalPages);
       } catch (e) {
         count.textContent = "";
         out.innerHTML = `<p class="search-hint">TMDb error: ${global.escapeHtml(e.message || String(e))}</p>`;
@@ -268,7 +298,7 @@
     const run = () => {
       if (mode === "universe") {
         clearTimeout(debounce);
-        debounce = setTimeout(runUniverse, 350);   // debounce live API calls
+        debounce = setTimeout(() => runUniverse(false), 350);  // fresh search, debounced
       } else {
         runCatalogue();
       }
@@ -358,12 +388,16 @@
         return;
       }
       const qBtn = e.target.closest(".queue-btn");
-      if (qBtn) queueAdd(qBtn);
+      if (qBtn) { queueAdd(qBtn); return; }
+      if (e.target.closest("#uni-more")) runUniverse(true);
     });
 
     // Filters TMDb can honour when browsing the universe; the rest are
     // catalogue-only concepts (status/role/tone/…) and get disabled there.
-    const UNIVERSE_FILTERS = new Set(["filter-kind", "filter-year-min"]);
+    const UNIVERSE_FILTERS = new Set([
+      "filter-kind", "filter-year-min", "filter-year-max", "filter-genre",
+      "filter-rating-min", "filter-rating-max",
+    ]);
     function applyModeToFilters() {
       const universe = mode === "universe";
       document.getElementById("search-filters").classList.toggle("universe", universe);

@@ -469,6 +469,7 @@ main.search-layout { max-width: 1500px; }
 .mode-btn + .mode-btn { border-left: 1px solid #444a5a; }
 .mode-btn.active { background: #2d3d5a; color: #fff; }
 .uni-overview { margin: 0.4rem 0 0; font-size: 0.85rem; opacity: 0.7; line-height: 1.4; }
+.uni-more { display: block; width: 100%; margin: 0.5rem 0 1rem; padding: 0.6rem; }
 .queue-btn {
   border: 1px solid #3a6a4a; background: #1c2a20; color: #9fe0b0;
   border-radius: 999px; padding: 0.25rem 0.8rem; font-size: 0.8rem; cursor: pointer;
