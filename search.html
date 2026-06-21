@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
   <title>Search &mdash; TV &amp; Movies Brain</title>
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
   <header>
@@ -25,56 +26,72 @@
   <main class="search-layout">
     <aside id="search-filters">
       <h2>Filters</h2>
-      <p class="universe-note">Universe honours <strong>Kind, Year, Genre, IMDb rating</strong> (and text search). Status / role / tone / theme / narrative / people are your catalogue's own tags and are disabled here.</p>
+      <p class="universe-note">Universe honours <strong>Kind, Year, Genre, IMDb rating</strong> (and text search). Status / role / tone / theme / narrative / people are your catalogue's own tags, so they're hidden here.</p>
 
-      <label class="f-label" for="filter-kind">Kind</label>
-      <select id="filter-kind">
-        <option value="">Any</option>
-        <option value="tv">TV</option>
-        <option value="movie">Movie</option>
-      </select>
-
-      <label class="f-label" for="filter-status">Your status</label>
-      <select id="filter-status">
-        <option value="">Any</option>
-      </select>
-
-      <label class="f-label" for="filter-role">Credited role</label>
-      <select id="filter-role">
-        <option value="">Any</option>
-      </select>
-
-      <label class="f-label">Year</label>
-      <div class="year-row">
-        <input type="number" id="filter-year-min" placeholder="from" min="1900" max="2100">
-        <span>&ndash;</span>
-        <input type="number" id="filter-year-max" placeholder="to" min="1900" max="2100">
+      <div class="f-group">
+        <label class="f-label" for="filter-kind">Kind</label>
+        <select id="filter-kind">
+          <option value="">Any</option>
+          <option value="tv">TV</option>
+          <option value="movie">Movie</option>
+        </select>
       </div>
 
-      <label class="f-label">IMDb rating</label>
-      <div class="year-row">
-        <input type="number" id="filter-rating-min" placeholder="min" min="0" max="10" step="0.1">
-        <span>&ndash;</span>
-        <input type="number" id="filter-rating-max" placeholder="max" min="0" max="10" step="0.1">
+      <div class="f-group">
+        <label class="f-label">Year</label>
+        <div class="year-row">
+          <input type="number" id="filter-year-min" placeholder="from" min="1900" max="2100">
+          <span>&ndash;</span>
+          <input type="number" id="filter-year-max" placeholder="to" min="1900" max="2100">
+        </div>
       </div>
 
-      <hr class="f-sep">
+      <div class="f-group">
+        <label class="f-label">IMDb rating</label>
+        <div class="year-row">
+          <input type="number" id="filter-rating-min" placeholder="min" min="0" max="10" step="0.1">
+          <span>&ndash;</span>
+          <input type="number" id="filter-rating-max" placeholder="max" min="0" max="10" step="0.1">
+        </div>
+      </div>
 
-      <label class="f-label" for="filter-genre">Genre</label>
-      <select id="filter-genre"><option value="">Any</option></select>
+      <div class="f-group">
+        <label class="f-label" for="filter-genre">Genre</label>
+        <select id="filter-genre"><option value="">Any</option></select>
+      </div>
 
-      <label class="f-label" for="filter-tone">Tone</label>
-      <select id="filter-tone"><option value="">Any</option></select>
+      <hr class="f-sep cat-only">
 
-      <label class="f-label" for="filter-theme">Theme</label>
-      <select id="filter-theme"><option value="">Any</option></select>
+      <div class="f-group cat-only">
+        <label class="f-label" for="filter-status">Your status</label>
+        <select id="filter-status"><option value="">Any</option></select>
+      </div>
 
-      <label class="f-label" for="filter-narrative">Narrative</label>
-      <select id="filter-narrative"><option value="">Any</option></select>
+      <div class="f-group cat-only">
+        <label class="f-label" for="filter-role">Credited role</label>
+        <select id="filter-role"><option value="">Any</option></select>
+      </div>
 
-      <label class="f-label" for="filter-people">People (all of)</label>
-      <select id="filter-people" multiple size="6"></select>
-      <span class="f-hint">Ctrl/Cmd-click for several</span>
+      <div class="f-group cat-only">
+        <label class="f-label" for="filter-tone">Tone</label>
+        <select id="filter-tone"><option value="">Any</option></select>
+      </div>
+
+      <div class="f-group cat-only">
+        <label class="f-label" for="filter-theme">Theme</label>
+        <select id="filter-theme"><option value="">Any</option></select>
+      </div>
+
+      <div class="f-group cat-only">
+        <label class="f-label" for="filter-narrative">Narrative</label>
+        <select id="filter-narrative"><option value="">Any</option></select>
+      </div>
+
+      <div class="f-group cat-only">
+        <label class="f-label" for="filter-people">People (all of)</label>
+        <select id="filter-people" multiple size="6"></select>
+        <span class="f-hint">Ctrl/Cmd-click for several</span>
+      </div>
 
       <button id="filter-reset" class="auth-btn">Reset filters</button>
     </aside>
@@ -91,11 +108,11 @@
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-config.js?v=4"></script>
-  <script src="status-store.js?v=4"></script>
-  <script src="ui.js?v=4"></script>
-  <script src="tmdb-config.js?v=4"></script>
-  <script src="tmdb-search.js?v=4"></script>
-  <script src="search.js?v=4"></script>
+  <script src="supabase-config.js?v=5"></script>
+  <script src="status-store.js?v=5"></script>
+  <script src="ui.js?v=5"></script>
+  <script src="tmdb-config.js?v=5"></script>
+  <script src="tmdb-search.js?v=5"></script>
+  <script src="search.js?v=5"></script>
 </body>
 </html>

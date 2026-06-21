@@ -392,18 +392,10 @@
       if (e.target.closest("#uni-more")) runUniverse(true);
     });
 
-    // Filters TMDb can honour when browsing the universe; the rest are
-    // catalogue-only concepts (status/role/tone/…) and get disabled there.
-    const UNIVERSE_FILTERS = new Set([
-      "filter-kind", "filter-year-min", "filter-year-max", "filter-genre",
-      "filter-rating-min", "filter-rating-max",
-    ]);
+    // Universe hides the catalogue-only filters (.cat-only) via CSS; only
+    // Kind / Year / Genre / Rating remain, which TMDb can honour.
     function applyModeToFilters() {
-      const universe = mode === "universe";
-      document.getElementById("search-filters").classList.toggle("universe", universe);
-      FILTER_IDS.forEach(id => {
-        document.getElementById(id).disabled = universe && !UNIVERSE_FILTERS.has(id);
-      });
+      document.getElementById("search-filters").classList.toggle("universe", mode === "universe");
     }
 
     document.querySelectorAll("#search-mode .mode-btn").forEach(btn => {

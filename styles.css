@@ -415,6 +415,9 @@ main.search-layout { max-width: 1500px; }
 .f-hint { display: block; font-size: 0.68rem; opacity: 0.45; margin-top: 0.2rem; }
 .universe-note { display: none; font-size: 0.78rem; opacity: 0.7; line-height: 1.4; margin: 0 0 0.6rem; }
 #search-filters.universe .universe-note { display: block; }
+.f-group { margin: 0; }
+/* Catalogue-only filters have no TMDb equivalent — hide them when browsing the universe. */
+#search-filters.universe .cat-only { display: none; }
 #filter-reset { width: 100%; margin-top: 1rem; }
 .search-count { opacity: 0.55; font-size: 0.85rem; margin: 0 0 0.8rem 0.2rem; }
 #search-input {
