@@ -361,14 +361,23 @@
       if (qBtn) queueAdd(qBtn);
     });
 
+    // Filters TMDb can honour when browsing the universe; the rest are
+    // catalogue-only concepts (status/role/tone/…) and get disabled there.
+    const UNIVERSE_FILTERS = new Set(["filter-kind", "filter-year-min"]);
+    function applyModeToFilters() {
+      const universe = mode === "universe";
+      document.getElementById("search-filters").classList.toggle("universe", universe);
+      FILTER_IDS.forEach(id => {
+        document.getElementById(id).disabled = universe && !UNIVERSE_FILTERS.has(id);
+      });
+    }
+
     document.querySelectorAll("#search-mode .mode-btn").forEach(btn => {
       btn.addEventListener("click", () => {
         document.querySelectorAll("#search-mode .mode-btn").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
         mode = btn.dataset.mode;
-        // In universe mode only Kind + the first Year box filter TMDb-side;
-        // mark the catalogue-only controls so it's clear.
-        document.getElementById("search-filters").classList.toggle("universe", mode === "universe");
+        applyModeToFilters();
         run();
       });
     });
