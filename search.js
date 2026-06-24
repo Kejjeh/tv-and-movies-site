@@ -270,16 +270,24 @@
       if (!q && !kind) { count.textContent = ""; uniResults = []; renderUniverse(out, [], false); return; }
       const num = id => { const v = document.getElementById(id).value; return v === "" ? null : Number(v); };
       const genreName = document.getElementById("filter-genre").value || null;
+      const themeName = document.getElementById("filter-theme").value || null;
+      const sortVal = document.getElementById("filter-sort").value;
       const filters = {
         yearMin: num("filter-year-min"), yearMax: num("filter-year-max"),
         ratingMin: num("filter-rating-min"), ratingMax: num("filter-rating-max"),
         genreIds: genreName ? await global.genreIdsFor(genreName) : [],
       };
+      const sortBy = sortVal === "rating" ? "vote_average.desc"
+        : sortVal === "newest" ? (kind === "movie" ? "primary_release_date.desc" : "first_air_date.desc")
+        : "popularity.desc";
       // Server-side /discover params (browse path) — TMDb filters before paging.
       const disc = {
         genreId: (genreName && kind) ? await global.genreIdFor(genreName, kind) : null,
+        keywordId: themeName ? await global.keywordIdFor(themeName) : null,
         ratingMin: filters.ratingMin, ratingMax: filters.ratingMax,
         yearMin: filters.yearMin, yearMax: filters.yearMax,
+        sortBy,
+        voteCountMin: sortVal === "rating" ? 200 : null,  // avoid obscure 10/10s
       };
       const page = append ? uniPage + 1 : 1;
       count.textContent = "searching TMDb…";
@@ -412,6 +420,9 @@
       el.addEventListener("input", run);
       el.addEventListener("change", run);
     });
+    // Sort is universe-only; not in FILTER_IDS so it doesn't trip the catalogue
+    // "active" check.
+    document.getElementById("filter-sort").addEventListener("change", run);
     document.getElementById("filter-reset").addEventListener("click", () => {
       FILTER_IDS.forEach(id => {
         const el = document.getElementById(id);

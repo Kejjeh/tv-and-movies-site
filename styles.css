@@ -418,6 +418,9 @@ main.search-layout { max-width: 1500px; }
 .f-group { margin: 0; }
 /* Catalogue-only filters have no TMDb equivalent — hide them when browsing the universe. */
 #search-filters.universe .cat-only { display: none; }
+/* Universe-only controls (e.g. Sort) — hidden in catalogue mode. */
+.uni-only { display: none; }
+#search-filters.universe .uni-only { display: block; }
 #filter-reset { width: 100%; margin-top: 1rem; }
 .search-count { opacity: 0.55; font-size: 0.85rem; margin: 0 0 0.8rem 0.2rem; }
 #search-input {

@@ -112,13 +112,16 @@
       const d = opts.disc || {};
       const dateGte = kind === "movie" ? "release_date.gte" : "first_air_date.gte";
       const dateLte = kind === "movie" ? "release_date.lte" : "first_air_date.lte";
+      const sort = d.sortBy || "popularity.desc";
       let bits = "";
       if (d.genreId != null) bits += `&with_genres=${encodeURIComponent(d.genreId)}`;
+      if (d.keywordId != null) bits += `&with_keywords=${encodeURIComponent(d.keywordId)}`;
       if (d.ratingMin != null) bits += `&vote_average.gte=${encodeURIComponent(d.ratingMin)}`;
       if (d.ratingMax != null) bits += `&vote_average.lte=${encodeURIComponent(d.ratingMax)}`;
+      if (d.voteCountMin != null) bits += `&vote_count.gte=${encodeURIComponent(d.voteCountMin)}`;
       if (d.yearMin != null) bits += `&${dateGte}=${encodeURIComponent(d.yearMin)}-01-01`;
       if (d.yearMax != null) bits += `&${dateLte}=${encodeURIComponent(d.yearMax)}-12-31`;
-      return { url: `${base}/discover/${kind}?include_adult=false&sort_by=popularity.desc${apiKey}${bits}${pageBit}`, typed: kind };
+      return { url: `${base}/discover/${kind}?include_adult=false&sort_by=${encodeURIComponent(sort)}${apiKey}${bits}${pageBit}`, typed: kind };
     }
     return null;
   }
@@ -177,6 +180,25 @@
     return m[kind].get(name.toLowerCase()) ?? null;
   }
 
+  // Resolve a theme name to a TMDb keyword id (keywords are shared across
+  // movie/tv), via /search/keyword. Cached; null if TMDb has no such keyword.
+  const keywordIdCache = new Map();
+  async function keywordIdFor(name) {
+    if (!name) return null;
+    const k = name.toLowerCase();
+    if (keywordIdCache.has(k)) return keywordIdCache.get(k);
+    const key = global.TMDB_API_KEY;
+    let id = null;
+    try {
+      const r = await fetch(`https://api.themoviedb.org/3/search/keyword?api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(name)}`);
+      const j = await r.json();
+      const exact = (j.results || []).find(x => (x.name || "").toLowerCase() === k);
+      id = exact ? exact.id : ((j.results && j.results[0]) ? j.results[0].id : null);
+    } catch (_) { /* leave null */ }
+    keywordIdCache.set(k, id);
+    return id;
+  }
+
   global.normalizeMulti = normalizeMulti;
   global.normalizeTyped = normalizeTyped;
   global.postFilterUniverse = postFilterUniverse;
@@ -184,6 +206,7 @@
   global.searchTmdb = searchTmdb;
   global.genreIdsFor = genreIdsFor;
   global.genreIdFor = genreIdFor;
+  global.keywordIdFor = keywordIdFor;
   if (typeof module !== "undefined" && module.exports) {
     module.exports = { normalizeMulti, normalizeTyped, postFilterUniverse, tmdbSearchUrl, searchTmdb };
   }
