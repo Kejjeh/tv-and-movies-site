@@ -42,16 +42,41 @@
     return map;
   }
 
-  async function setStatus(tmdbId, kind, status) {
-    const { error } = await client
-      .from("statuses")
-      .upsert({ tmdb_id: tmdbId, kind, status, updated_at: new Date().toISOString() });
+  async function setStatus(tmdbId, kind, status, source) {
+    const row = { tmdb_id: tmdbId, kind, status, updated_at: new Date().toISOString() };
+    // Only send `source` when given — omit it so a pre-migration table (no
+    // source column) still accepts the upsert.
+    if (source != null) row.source = source;
+    const { error } = await client.from("statuses").upsert(row);
     if (error) throw error;
   }
 
   async function clearStatus(tmdbId, kind) {
     const { error } = await client.from("statuses").delete().match({ tmdb_id: tmdbId, kind });
     if (error) throw error;
+  }
+
+  // ---- Not-seen / skip (confirm-queue) --------------------------------
+  // Records "I haven't seen this" so the confirm queue stops re-surfacing it.
+  async function markSkipped(tmdbId, kind) {
+    const { error } = await client
+      .from("not_seen")
+      .upsert({ tmdb_id: tmdbId, kind, marked_at: new Date().toISOString() });
+    if (error) throw error;
+  }
+
+  // The set of "tmdb_id|kind" keys the user has marked not-seen. Resilient to
+  // the table not existing yet (returns an empty set before the migration).
+  async function loadSkips() {
+    try {
+      const { data, error } = await client.from("not_seen").select("tmdb_id,kind");
+      if (error) throw error;
+      const set = new Set();
+      for (const r of data) set.add(statusKey(r.tmdb_id, r.kind));
+      return set;
+    } catch (_) {
+      return new Set();
+    }
   }
 
   // Queue a universe title for the reconcile job to ingest into brain.db.
@@ -91,6 +116,7 @@
   const API = {
     statusKey, applyStatuses,
     init, loadStatuses, setStatus, clearStatus, queueAdd, triggerReconcile,
+    markSkipped, loadSkips,
     signIn, signOut, currentUser,
   };
   global.StatusStore = API;

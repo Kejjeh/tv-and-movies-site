@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
+  <title>Confirm &mdash; TV &amp; Movies Brain</title>
+  <link rel="stylesheet" href="styles.css?v=7">
+</head>
+<body>
+  <header>
+    <div class="header-row">
+      <h1>TV &amp; Movies Brain</h1>
+      <nav>
+        <a href="index.html">Recommendations</a>
+        <a href="graph.html">Graph</a>
+        <a href="insights.html">Insights</a>
+        <a href="discovery.html">Discovery</a>
+        <a href="confirm.html" class="active">Confirm</a>
+        <a href="search.html">Search</a>
+      </nav>
+      <div id="auth" class="auth"></div>
+    </div>
+    <p class="subtitle">Titles you&rsquo;ve probably seen &mdash; tap a reaction to confirm, or &ldquo;Haven&rsquo;t seen&rdquo; to skip. Every confirmation sharpens your recommendations.</p>
+  </header>
+
+  <main class="confirm-layout">
+    <div class="search-mode" id="confirm-tabs">
+      <button class="mode-btn active" data-tab="suggested">Suggested</button>
+      <button class="mode-btn" data-tab="creator">By creator</button>
+      <button class="mode-btn" data-tab="watched">Because you watched</button>
+      <button class="mode-btn" data-tab="discover">Discover</button>
+      <button class="mode-btn" data-tab="import">Import a file</button>
+    </div>
+    <p id="confirm-count" class="search-count"></p>
+    <div id="confirm-deck"></div>
+    <div id="import-panel" class="import-panel" hidden></div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js?v=7"></script>
+  <script src="status-store.js?v=7"></script>
+  <script src="ui.js?v=7"></script>
+  <script src="rating-map.js?v=7"></script>
+  <script src="tmdb-config.js?v=7"></script>
+  <script src="tmdb-search.js?v=7"></script>
+  <script src="import.js?v=7"></script>
+  <script src="confirm.js?v=7"></script>
+</body>
+</html>

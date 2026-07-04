@@ -482,3 +482,18 @@ main.search-layout { max-width: 1500px; }
 }
 .queue-btn:hover { background: #243a2a; border-color: #7ee787; }
 .queue-btn:disabled { opacity: 0.7; cursor: default; }
+
+/* ===== Confirm-queue page ===== */
+main.confirm-layout { max-width: 900px; }
+#confirm-tabs { flex-wrap: wrap; }
+.confirm-card { margin-bottom: 0.7rem; }
+.confirm-sub { color: var(--text-dim); font-size: 0.82rem; margin: 0.15rem 0 0.55rem; }
+.status-btn.skip-btn {
+  margin-left: 0.4rem; border-color: #555b6a; color: var(--text-dim);
+}
+.status-btn.skip-btn:hover { background: #2a2f3a; border-color: #9aa0a6; color: #cfd3da; }
+.import-panel { padding: 0.4rem 0.2rem; }
+.import-help { color: var(--text-dim); font-size: 0.9rem; line-height: 1.5; margin: 0 0 0.9rem; }
+.import-help code { background: #1a1d24; padding: 0.05rem 0.35rem; border-radius: 4px; }
+#import-file { display: block; margin-bottom: 0.9rem; color: var(--text-dim); }
+.import-log { color: var(--accent); font-size: 0.88rem; min-height: 1.2rem; white-space: pre-wrap; }

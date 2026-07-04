@@ -199,6 +199,50 @@
     return id;
   }
 
+  // ---- Extra browser helpers (import + auteur-completion) -------------
+
+  // Resolve an IMDb id (ttXXXXXXX) to a TMDb {tmdb_id, kind, name, year} via
+  // /find. Exact — no fuzzy title matching. Returns null if nothing matches.
+  async function findByImdbId(imdbId) {
+    const key = global.TMDB_API_KEY;
+    if (!key) throw new Error("TMDB_API_KEY not configured");
+    const url = `https://api.themoviedb.org/3/find/${encodeURIComponent(imdbId)}` +
+      `?external_source=imdb_id&api_key=${encodeURIComponent(key)}`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`TMDb ${r.status}`);
+    const j = await r.json();
+    const m = (j.movie_results || [])[0];
+    if (m) return { tmdb_id: m.id, kind: "movie", name: m.title || "", year: yearOf(m) };
+    const tv = (j.tv_results || [])[0];
+    if (tv) return { tmdb_id: tv.id, kind: "tv", name: tv.name || "", year: yearOf(tv) };
+    return null;
+  }
+
+  // Fuzzy-resolve a movie by name (+ optional year) to a TMDb id — first hit.
+  async function searchOneMovie(name, year) {
+    const key = global.TMDB_API_KEY;
+    if (!key) throw new Error("TMDB_API_KEY not configured");
+    const yr = year ? `&primary_release_year=${encodeURIComponent(year)}` : "";
+    const url = `https://api.themoviedb.org/3/search/movie?include_adult=false` +
+      `&api_key=${encodeURIComponent(key)}&query=${encodeURIComponent(name)}${yr}`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`TMDb ${r.status}`);
+    const j = await r.json();
+    const m = (j.results || [])[0];
+    return m ? { tmdb_id: m.id, kind: "movie", name: m.title || name, year: yearOf(m) } : null;
+  }
+
+  // A person's whole filmography ({cast, crew}) — the auteur-completion source.
+  async function fetchCombinedCredits(personId) {
+    const key = global.TMDB_API_KEY;
+    if (!key) throw new Error("TMDB_API_KEY not configured");
+    const url = `https://api.themoviedb.org/3/person/${encodeURIComponent(personId)}` +
+      `/combined_credits?api_key=${encodeURIComponent(key)}`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`TMDb ${r.status}`);
+    return r.json();
+  }
+
   global.normalizeMulti = normalizeMulti;
   global.normalizeTyped = normalizeTyped;
   global.postFilterUniverse = postFilterUniverse;
@@ -207,7 +251,13 @@
   global.genreIdsFor = genreIdsFor;
   global.genreIdFor = genreIdFor;
   global.keywordIdFor = keywordIdFor;
+  global.findByImdbId = findByImdbId;
+  global.searchOneMovie = searchOneMovie;
+  global.fetchCombinedCredits = fetchCombinedCredits;
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { normalizeMulti, normalizeTyped, postFilterUniverse, tmdbSearchUrl, searchTmdb };
+    module.exports = {
+      normalizeMulti, normalizeTyped, postFilterUniverse, tmdbSearchUrl, searchTmdb,
+      findByImdbId, searchOneMovie, fetchCombinedCredits,
+    };
   }
 })(typeof globalThis !== "undefined" ? globalThis : this);

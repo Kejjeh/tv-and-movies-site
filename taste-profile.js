@@ -10,6 +10,14 @@
 (function (global) {
   "use strict";
 
+  // rating-map is loaded before this file in the browser (global RatingMap) and
+  // required directly under node. A passive, ratingless import counts as seen
+  // but must not calibrate the profile (see web/rating-map.js).
+  const RM = (typeof require !== "undefined")
+    ? require("./rating-map.js")
+    : (global.RatingMap || {});
+  const isTasteBearing = RM.isTasteBearing || function () { return true; };
+
   // Index people across an arbitrary title list. The indexer does not filter —
   // the caller chooses the cut (seen, loved, a lane). Each entry carries a
   // role->count map and one {title, role} record per credited appearance.
@@ -46,7 +54,7 @@
   }
 
   function buildProfile(titles) {
-    const seen = titles.filter(t => t.seen);
+    const seen = titles.filter(t => t.seen && isTasteBearing(t.status, t.source));
     const peopleIndex = indexPeople(seen);
 
     // Plain person -> seen titles view for the scorer (its hot path).
