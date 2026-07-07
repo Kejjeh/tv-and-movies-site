@@ -122,6 +122,7 @@
   const SOURCES = {
     suggested: loadSuggested,
     creator: loadCreator,
+    franchise: loadFranchise,
     watched: () => loadJsonSource("neighbors.json", "Because you watched", n => n.items || []),
     discover: () => loadJsonSource("probes.json", "Discover", n => n.items || []),
     rate: loadRate,
@@ -247,6 +248,44 @@
         tmdb_id: t.tmdb_id, kind: t.kind, name: t.name, year: t.year,
         sub: `you marked this “${t.status === "started" ? "Started" : "Seen"}” — how was it?`,
       }));
+  }
+
+  // Franchise completion — for each franchise you've partly seen, TMDb's
+  // collection members that aren't in your brain yet. The highest-precision
+  // "seen the rest?" source: franchise membership is near-certain behaviour.
+  // One live /collection call per partly-seen franchise.
+  async function loadFranchise() {
+    const byCollection = new Map();
+    for (const t of state.titles) {
+      if (t.seen && t.kind === "movie" && t.collection_id) {
+        const e = byCollection.get(t.collection_id) ||
+          { id: t.collection_id, name: t.collection_name, seen: 0 };
+        e.seen++;
+        byCollection.set(t.collection_id, e);
+      }
+    }
+    // Strongest signal first (most already seen); cap live calls.
+    const collections = [...byCollection.values()]
+      .sort((a, b) => b.seen - a.seen).slice(0, 15);
+
+    const cards = [];
+    for (const col of collections) {
+      let data;
+      try { data = await window.fetchCollection(col.id); }
+      catch (_) { continue; }
+      const parts = data.parts || [];
+      for (const p of parts) {
+        const k = key(p.id, "movie");
+        if (state.knownKeys.has(k)) continue;   // already in brain (seen or candidate)
+        cards.push({
+          tmdb_id: p.id, kind: "movie", name: p.title || p.name || "?",
+          year: Number((p.release_date || "").slice(0, 4)) || null,
+          sub: `${col.name} — you've seen ${col.seen} of ${parts.length}`,
+          _pop: p.popularity || 0,
+        });
+      }
+    }
+    return cards.sort((a, b) => b._pop - a._pop);
   }
 
   // Generic loader for a prebuilt json source (neighbors.json / probes.json).

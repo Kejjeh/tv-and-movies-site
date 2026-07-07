@@ -243,6 +243,18 @@
     return r.json();
   }
 
+  // A franchise's members ({id, name, parts:[{id,title,release_date,...}]}) —
+  // the franchise-completion source.
+  async function fetchCollection(collectionId) {
+    const key = global.TMDB_API_KEY;
+    if (!key) throw new Error("TMDB_API_KEY not configured");
+    const url = `https://api.themoviedb.org/3/collection/${encodeURIComponent(collectionId)}` +
+      `?api_key=${encodeURIComponent(key)}`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`TMDb ${r.status}`);
+    return r.json();
+  }
+
   global.normalizeMulti = normalizeMulti;
   global.normalizeTyped = normalizeTyped;
   global.postFilterUniverse = postFilterUniverse;
@@ -254,10 +266,11 @@
   global.findByImdbId = findByImdbId;
   global.searchOneMovie = searchOneMovie;
   global.fetchCombinedCredits = fetchCombinedCredits;
+  global.fetchCollection = fetchCollection;
   if (typeof module !== "undefined" && module.exports) {
     module.exports = {
       normalizeMulti, normalizeTyped, postFilterUniverse, tmdbSearchUrl, searchTmdb,
-      findByImdbId, searchOneMovie, fetchCombinedCredits,
+      findByImdbId, searchOneMovie, fetchCombinedCredits, fetchCollection,
     };
   }
 })(typeof globalThis !== "undefined" ? globalThis : this);
