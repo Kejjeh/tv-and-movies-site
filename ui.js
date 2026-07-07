@@ -49,6 +49,14 @@
   global.titleCase = titleCase;
   global.UI = UI;
 
+  // Register the service worker (installable PWA + offline shell). Browser
+  // only, best-effort — never blocks or throws into page code.
+  if (global.document && global.navigator && "serviceWorker" in global.navigator) {
+    global.addEventListener("load", () => {
+      global.navigator.serviceWorker.register("sw.js").catch(() => {});
+    });
+  }
+
   // Node / test harness.
   if (typeof module !== "undefined" && module.exports) {
     module.exports = UI;
