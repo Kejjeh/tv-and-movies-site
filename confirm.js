@@ -25,7 +25,8 @@
 
   const state = {
     titles: [],           // data.json titles merged with live statuses
-    knownKeys: new Set(),  // everything already in brain.db
+    knownKeys: new Set(),  // everything already in brain.db (seen + candidates)
+    seenKeys: new Set(),   // already marked seen — an import must not overwrite these
     handled: new Set(),    // keys to hide: server statuses + skips + this session's actions
     sessionHandled: new Set(), // this session's confirms/skips — survives overlay reloads
     loggedIn: false,
@@ -35,11 +36,14 @@
 
   async function init() {
     try {
-      const r = await fetch("data.json", { cache: "no-store" });
+      const r = await fetch("data.json");
       const data = await r.json();
       state.titles = data.titles || [];
     } catch (_) { state.titles = []; }
-    for (const t of state.titles) state.knownKeys.add(key(t.tmdb_id, t.kind));
+    for (const t of state.titles) {
+      state.knownKeys.add(key(t.tmdb_id, t.kind));
+      if (t.seen) state.seenKeys.add(key(t.tmdb_id, t.kind));
+    }
 
     await initStatuses();
     bindTabs();
@@ -120,7 +124,13 @@
     creator: loadCreator,
     watched: () => loadJsonSource("neighbors.json", "Because you watched", n => n.items || []),
     discover: () => loadJsonSource("probes.json", "Discover", n => n.items || []),
+    rate: loadRate,
   };
+
+  // Tabs whose cards are the user's OWN already-seen titles: they carry an 'ok'
+  // status (so they're in `handled`) but re-rating them is the entire point, so
+  // they're filtered only by this session's actions, not the server overlay.
+  const OWN_TABS = new Set(["rate"]);
 
   async function showTab(tab) {
     state.activeTab = tab;
@@ -131,6 +141,7 @@
       if (!importPanel.dataset.mounted) {
         window.Import.init(importPanel, {
           knownKeys: state.knownKeys,
+          seenKeys: state.seenKeys,
           isLoggedIn: () => state.loggedIn,
           onImported: (k) => state.handled.add(k),
         });
@@ -147,19 +158,28 @@
       deck.innerHTML = `<p class="search-hint">Could not load this source: ${escapeHtml(e.message || String(e))}</p>`;
       return;
     }
-    renderDeck(cards.filter(c => !state.handled.has(key(c.tmdb_id, c.kind))));
+    const hide = OWN_TABS.has(tab) ? state.sessionHandled : state.handled;
+    renderDeck(cards.filter(c => !hide.has(key(c.tmdb_id, c.kind))));
   }
 
   /* ---- Sources ---- */
   // Discovery p_seen queue — zero live calls; ranked offline in export_discovery.
   async function loadSuggested() {
+    // Prefer the slim, pre-ranked suggested.json (~20 KB, unseen-only); fall
+    // back to the full discovery.json for older deploys that don't ship it.
     let works = [];
     try {
-      const r = await fetch("discovery.json", { cache: "no-store" });
+      const r = await fetch("suggested.json");
+      if (!r.ok) throw new Error("no slim file");
       works = (await r.json()).works || [];
-    } catch (_) { return []; }
+    } catch (_) {
+      try {
+        const r = await fetch("discovery.json");
+        works = ((await r.json()).works || []).filter(w => w.status === "unseen");
+      } catch (_2) { return []; }
+    }
     return works
-      .filter(w => (w.status === "unseen") && !state.knownKeys.has(key(w.tmdb_id, w.kind)))
+      .filter(w => !state.knownKeys.has(key(w.tmdb_id, w.kind)))
       .sort((a, b) => (b.p_seen || 0) - (a.p_seen || 0))
       .slice(0, 80)
       .map(w => ({
@@ -214,11 +234,26 @@
     return cards;
   }
 
+  // "Rate seen" — your own watched titles that never got a real reaction
+  // ('ok' shrugs and 'started'). Re-rating these harvests the graded and
+  // negative signal the taste profile is starved of (the multiplier scale runs
+  // on 2 of its 6 values today). Most-recent-ish first by tmdb_id as a proxy.
+  async function loadRate() {
+    return state.titles
+      .filter(t => t.seen && (t.status === "ok" || t.status === "started"))
+      .sort((a, b) => (b.tmdb_id || 0) - (a.tmdb_id || 0))
+      .slice(0, 80)
+      .map(t => ({
+        tmdb_id: t.tmdb_id, kind: t.kind, name: t.name, year: t.year,
+        sub: `you marked this “${t.status === "started" ? "Started" : "Seen"}” — how was it?`,
+      }));
+  }
+
   // Generic loader for a prebuilt json source (neighbors.json / probes.json).
   async function loadJsonSource(file, label, pick) {
     let payload;
     try {
-      const r = await fetch(file, { cache: "no-store" });
+      const r = await fetch(file);
       if (!r.ok) throw new Error("not built yet");
       payload = await r.json();
     } catch (_) {

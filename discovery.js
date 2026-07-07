@@ -25,7 +25,7 @@ const state = {
 };
 
 async function init() {
-  const res = await fetch("discovery.json", { cache: "no-store" });
+  const res = await fetch("discovery.json");
   if (!res.ok) {
     document.getElementById("subtitle").textContent =
       "discovery.json not found yet — run scripts/build_discovery.py then export_discovery.py";

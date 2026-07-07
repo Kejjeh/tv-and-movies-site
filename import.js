@@ -118,6 +118,10 @@
     API.init = function initImport(root, opts) {
       opts = opts || {};
       const knownKeys = opts.knownKeys || new Set();
+      // Titles already marked seen — we don't overwrite their existing status
+      // (which may be a hand-curated rating). Everything else, including titles
+      // already tracked as unseen CANDIDATES, still gets its imported status.
+      const seenKeys = opts.seenKeys || new Set();
       const isLoggedIn = opts.isLoggedIn || (() => false);
       root.innerHTML =
         `<p class="import-help">Drop an <strong>IMDb ratings export</strong> ` +
@@ -151,14 +155,26 @@
               hit = await global.searchOneMovie(row.name, row.year);
               status = global.statusFromFive(row.rating);
             }
+            // Unrated rows carry a passive `<fmt>-watched` provenance so they
+            // count as seen but don't calibrate the taste profile.
+            const source = global.importSource(fmt, row.rating);
             if (!hit) { unmatched++; }
             else {
               const key = `${hit.tmdb_id}|${hit.kind}`;
-              if (knownKeys.has(key)) { skipped++; }
-              else {
-                await global.StatusStore.queueAdd(hit.tmdb_id, hit.kind, hit.name);
-                await global.StatusStore.setStatus(hit.tmdb_id, hit.kind, status, fmt);
-                knownKeys.add(key);
+              if (seenKeys.has(key)) {
+                // Already seen with a status we trust — don't clobber it.
+                skipped++;
+              } else {
+                // Only queue titles brain.db doesn't track yet; but ALWAYS
+                // write the status, so a title already tracked as an unseen
+                // candidate finally gets its rating (the old code silently
+                // dropped exactly these).
+                if (!knownKeys.has(key)) {
+                  await global.StatusStore.queueAdd(hit.tmdb_id, hit.kind, hit.name);
+                  knownKeys.add(key);
+                }
+                await global.StatusStore.setStatus(hit.tmdb_id, hit.kind, status, source);
+                seenKeys.add(key);
                 added++;
                 if (opts.onImported) opts.onImported(key, status);
               }
@@ -167,11 +183,11 @@
             unmatched++;
           }
           if (done % 5 === 0 || done === rows.length) {
-            log(`${done}/${rows.length} · ${added} added · ${skipped} already had · ${unmatched} unmatched`);
+            log(`${done}/${rows.length} · ${added} rated · ${skipped} already seen · ${unmatched} unmatched`);
           }
           await sleep(260);  // ~4 req/sec, under TMDb's ceiling
         }
-        log(`Done: ${added} added, ${skipped} already in your set, ${unmatched} unmatched. ` +
+        log(`Done: ${added} rated, ${skipped} already seen, ${unmatched} unmatched. ` +
           `Run “Reconcile now” to bake them in.`);
       });
     };

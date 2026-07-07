@@ -16,6 +16,18 @@
     return (roleWeights[role] != null) ? roleWeights[role] : 1.0;
   }
 
+  const NEUTRAL_AFFINITY = 0.5;
+
+  // Mean affinity over the candidate's tags the seen-set has an opinion on;
+  // neutral when none are judged. Mirror of brain.scoring._affinity_score.
+  function affinityScore(candTags, amap) {
+    let sum = 0, n = 0;
+    for (const tag of (candTags || [])) {
+      if (amap.has(tag)) { sum += amap.get(tag); n++; }
+    }
+    return n === 0 ? NEUTRAL_AFFINITY : sum / n;
+  }
+
   // `profile` is a prebuilt taste profile (see web/taste-profile.js) — the
   // seen-graph derived once, not rebuilt per candidate.
   function scoreCandidate(cand, profile, mood, params) {
@@ -28,7 +40,6 @@
     const personToSeen = profile.seenByPerson;
     const seenTones = profile.seenTones;
     const seenGenres = profile.seenGenres;
-    const seenNarratives = profile.seenNarratives;
 
     // people_overlap: each candidate person picks up the status multiplier of
     // the strongest-reacted seen title they appear in (largest absolute value).
@@ -48,10 +59,16 @@
     }
     const peopleOverlap = totalW > 0 ? Math.max(0, Math.min(1.0, matchedW / totalW)) : 0;
 
+    // tone / genre / narrative: preference affinity, not set-membership fraction.
+    const toneMatch = affinityScore(cand.tone_tags, profile.toneAffinity);
+    const genreFit = affinityScore(cand.genres, profile.genreAffinity);
+    const candNarratives = cand.narratives || [];
+    const narrativeMatch = affinityScore(candNarratives, profile.narrativeAffinity);
+    // Still surfaced in reason strings (presentation only).
+    const seenNarratives = profile.seenNarratives;
     const sharedTones = cand.tone_tags.filter(t => seenTones.has(t));
-    const toneMatch = cand.tone_tags.length > 0 ? sharedTones.length / cand.tone_tags.length : 0;
     const sharedGenres = cand.genres.filter(g => seenGenres.has(g));
-    const genreFit = cand.genres.length > 0 ? sharedGenres.length / cand.genres.length : 0;
+    const sharedNarratives = candNarratives.filter(n => seenNarratives.has(n));
 
     let moodMatch = 0.5;
     let moodMatched = [];
@@ -59,11 +76,6 @@
       moodMatched = mood.filter(m => cand.tone_tags.includes(m));
       moodMatch = moodMatched.length / mood.length;
     }
-
-    const candNarratives = cand.narratives || [];
-    const sharedNarratives = candNarratives.filter(n => seenNarratives.has(n));
-    const narrativeMatch = candNarratives.length > 0
-      ? sharedNarratives.length / candNarratives.length : 0;
 
     const breakdown = {
       tone_match: toneMatch,
@@ -87,7 +99,10 @@
       if (!sources || sources.length === 0) continue;
       const contrib = totalPeopleW > 0
         ? roleWeight(roleWeights, p.role) / totalPeopleW * weights.people_overlap : 0;
-      const names = sources.map(t => t.name).join(", ");
+      // Annotate each shared title with the status that drives its pull.
+      const names = sources
+        .map(t => (t.status && t.status !== "ok") ? `${t.name} (${t.status})` : t.name)
+        .join(", ");
       pairs.push([contrib, `Shares ${p.name} (${p.role}) with ${names}`]);
     }
     if (sharedTones.length > 0) {

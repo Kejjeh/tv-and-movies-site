@@ -34,11 +34,27 @@
     return client;
   }
 
+  // Page past Supabase/PostgREST's default 1000-row cap so a large seen-set
+  // isn't silently truncated on load.
+  const PAGE_SIZE = 1000;
+
+  async function loadAllRows(table, columns) {
+    const out = [];
+    let from = 0;
+    for (;;) {
+      const { data, error } = await client
+        .from(table).select(columns).range(from, from + PAGE_SIZE - 1);
+      if (error) throw error;
+      out.push(...data);
+      if (data.length < PAGE_SIZE) return out;
+      from += PAGE_SIZE;
+    }
+  }
+
   async function loadStatuses() {
-    const { data, error } = await client.from("statuses").select("tmdb_id,kind,status");
-    if (error) throw error;
+    const rows = await loadAllRows("statuses", "tmdb_id,kind,status");
     const map = new Map();
-    for (const r of data) map.set(statusKey(r.tmdb_id, r.kind), r.status);
+    for (const r of rows) map.set(statusKey(r.tmdb_id, r.kind), r.status);
     return map;
   }
 
@@ -69,10 +85,9 @@
   // the table not existing yet (returns an empty set before the migration).
   async function loadSkips() {
     try {
-      const { data, error } = await client.from("not_seen").select("tmdb_id,kind");
-      if (error) throw error;
+      const rows = await loadAllRows("not_seen", "tmdb_id,kind");
       const set = new Set();
-      for (const r of data) set.add(statusKey(r.tmdb_id, r.kind));
+      for (const r of rows) set.add(statusKey(r.tmdb_id, r.kind));
       return set;
     } catch (_) {
       return new Set();

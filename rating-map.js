@@ -9,8 +9,18 @@
 
   const STATUS_DEFAULT = "ok";
   // Ratingless "watched" sources — a title imported this way defaults to 'ok'
-  // and must not calibrate taste.
-  const PASSIVE_SOURCES = new Set(["netflix"]);
+  // and must not calibrate taste. The `*-watched` tags are written by the CSV
+  // importer for UNRATED rows; the same platform WITH a rating uses its plain
+  // tag and stays taste-bearing. Mirror of brain/rating_map.py PASSIVE_SOURCES.
+  const PASSIVE_SOURCES = new Set([
+    "netflix", "letterboxd-watched", "imdb-watched", "trakt-watched",
+  ]);
+
+  // The provenance tag to record for an imported row: unrated rows are passive
+  // (a bulk "watched" mark), rated rows carry the plain platform tag.
+  function importSource(format, rating) {
+    return rating == null ? `${format}-watched` : format;
+  }
 
   // 0-10 (IMDb / TMDb / Trakt): >=9 loved, 7-8 liked, 5-6 ok, 3-4 disliked, <3 hated.
   // A missing rating is a passive "watched" mark -> ok.
@@ -46,12 +56,13 @@
 
   const API = {
     statusFromTen, statusFromFive, personalRatingFromFive, isTasteBearing,
-    PASSIVE_SOURCES,
+    importSource, PASSIVE_SOURCES,
   };
   global.RatingMap = API;
   global.statusFromTen = statusFromTen;
   global.statusFromFive = statusFromFive;
   global.isTasteBearing = isTasteBearing;
+  global.importSource = importSource;
   if (typeof module !== "undefined" && module.exports) {
     module.exports = API;
   }

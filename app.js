@@ -15,10 +15,16 @@ const STATUS_MULTIPLIER_FALLBACK = {
   hated:    -0.6,
 };
 
+// Fallback only — real values ship in data.json (brain/scoring.py).
+const STATUS_AFFINITY_FALLBACK = {
+  loved: 1.0, liked: 0.75, ok: 0.5, started: 0.4, disliked: 0.2, hated: 0.0,
+};
+
 let DATA = null;
 let WEIGHTS = null;
 let ROLE_WEIGHTS = null;
 let STATUS_MULTIPLIER = null;
+let STATUS_AFFINITY = null;
 
 // Status editing (Supabase). RAW_TITLES is the shipped data.json titles;
 // DATA.titles = applyStatuses(RAW_TITLES, STATUS_MAP) so edits re-merge cleanly.
@@ -63,6 +69,7 @@ async function load() {
   WEIGHTS = DATA.weights;
   ROLE_WEIGHTS = DATA.role_weights;
   STATUS_MULTIPLIER = DATA.status_multipliers || STATUS_MULTIPLIER_FALLBACK;
+  STATUS_AFFINITY = DATA.status_affinity || STATUS_AFFINITY_FALLBACK;
   RAW_TITLES = DATA.titles;
   await initStatuses();   // merge stored statuses over the shipped titles
   buildLaneChips();
@@ -75,6 +82,7 @@ async function load() {
   setSubtitle();
   setUpdated();
   document.getElementById("results").addEventListener("click", onStatusClick);
+  document.getElementById("continue").addEventListener("click", onStatusClick);
   render();
 }
 
@@ -417,8 +425,38 @@ function bindControls() {
    scorer, pinned to brain/scoring.py by tests/fixtures/scoring_parity.json.
    We call it with scoringParams() so the constants come from data.json. */
 
+// "Continue watching" — seen titles left at status 'started'. Resuming
+// something you're mid-way through is very often the real "what tonight"
+// answer, so surface it above the recommendations. The status buttons let you
+// bump it (loved/ok/abandoned) — doing so re-renders and drops it from here.
+function renderContinue() {
+  const el = document.getElementById("continue");
+  if (!el || !DATA) return;
+  const started = DATA.titles
+    .filter(t => t.seen && t.status === "started")
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  if (started.length === 0) { el.hidden = true; el.innerHTML = ""; return; }
+  el.hidden = false;
+  el.innerHTML =
+    `<h2 class="continue-title">Continue watching <span class="continue-count">${started.length}</span></h2>` +
+    `<div class="continue-row">` +
+    started.map(t => {
+      const year = t.year ? ` (${t.year})` : "";
+      const kindBadge = t.kind === "movie" ? '<span class="kind">movie</span>' : "";
+      return `<article class="continue-card">` +
+        `<h4>${escapeHtml(t.name)}${year}${kindBadge}</h4>` +
+        `<div class="status-actions" data-tmdb="${t.tmdb_id}" data-kind="${escapeHtml(t.kind)}">` +
+        `<span class="status-actions-label">Update:</span>` +
+        STATUS_CHOICES.map(([s, label]) =>
+          `<button class="status-btn status-${s}" data-status="${s}">${label}</button>`).join("") +
+        `</div></article>`;
+    }).join("") +
+    `</div>`;
+}
+
 function render() {
   if (!DATA) return;
+  renderContinue();
   const seen = DATA.titles.filter(t => t.seen);
   let cands = DATA.titles.filter(t => !t.seen);
   if (state.kind !== "all") cands = cands.filter(t => t.kind === state.kind);
@@ -445,7 +483,7 @@ function render() {
 
   const mood = [...state.mood];
   const params = scoringParams();
-  const profile = buildProfile(seen);  // derive the seen-graph once, not per candidate
+  const profile = buildProfile(seen, STATUS_AFFINITY);  // derive the seen-graph once, not per candidate
   const recs = cands.map(c => scoreCandidate(c, profile, mood, params));
   recs.sort((a, b) => b.score - a.score);
   if (state.mode === "anti") {

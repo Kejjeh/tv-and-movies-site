@@ -199,6 +199,42 @@ input[type=range] {
   font-family: monospace;
 }
 
+.results-col { min-width: 0; }
+
+#continue { margin-bottom: 1.4rem; }
+.continue-title {
+  font-size: 1rem;
+  margin: 0 0 0.7rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.continue-count {
+  font-size: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  color: var(--text-dim);
+}
+.continue-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+.continue-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+  flex: 1 1 240px;
+}
+.continue-card h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
 #results {
   display: flex;
   flex-direction: column;
