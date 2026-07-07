@@ -125,6 +125,7 @@
     franchise: loadFranchise,
     watched: () => loadJsonSource("neighbors.json", "Because you watched", n => n.items || []),
     discover: () => loadJsonSource("probes.json", "Discover", n => n.items || []),
+    canon: () => loadJsonSource("lists.json", "Canon", n => n.items || []),
     rate: loadRate,
   };
 
