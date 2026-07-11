@@ -14,6 +14,7 @@
   // tag and stays taste-bearing. Mirror of brain/rating_map.py PASSIVE_SOURCES.
   const PASSIVE_SOURCES = new Set([
     "netflix", "letterboxd-watched", "imdb-watched", "trakt-watched",
+    "manual-watched",
   ]);
 
   // The provenance tag to record for an imported row: unrated rows are passive

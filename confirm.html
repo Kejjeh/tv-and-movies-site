@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
   <title>Confirm &mdash; TV &amp; Movies Brain</title>
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=12">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#12141c">
   <link rel="apple-touch-icon" href="icon-192.png">
@@ -36,21 +36,24 @@
       <button class="mode-btn" data-tab="discover">Discover</button>
       <button class="mode-btn" data-tab="canon">Canon</button>
       <button class="mode-btn" data-tab="rate">Rate seen</button>
+      <button class="mode-btn" data-tab="paste">Paste a list</button>
       <button class="mode-btn" data-tab="import">Import a file</button>
     </div>
     <p id="confirm-count" class="search-count"></p>
     <div id="confirm-deck"></div>
     <div id="import-panel" class="import-panel" hidden></div>
+    <div id="paste-panel" class="import-panel" hidden></div>
   </main>
 
   <script src="vendor/supabase-js-2.110.0.min.js"></script>
-  <script src="supabase-config.js?v=11"></script>
-  <script src="status-store.js?v=11"></script>
-  <script src="ui.js?v=11"></script>
-  <script src="rating-map.js?v=11"></script>
-  <script src="tmdb-config.js?v=11"></script>
-  <script src="tmdb-search.js?v=11"></script>
-  <script src="import.js?v=11"></script>
-  <script src="confirm.js?v=11"></script>
+  <script src="supabase-config.js?v=12"></script>
+  <script src="status-store.js?v=12"></script>
+  <script src="ui.js?v=12"></script>
+  <script src="rating-map.js?v=12"></script>
+  <script src="tmdb-config.js?v=12"></script>
+  <script src="tmdb-search.js?v=12"></script>
+  <script src="import.js?v=12"></script>
+  <script src="paste.js?v=12"></script>
+  <script src="confirm.js?v=12"></script>
 </body>
 </html>

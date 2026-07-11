@@ -533,3 +533,25 @@ main.confirm-layout { max-width: 900px; }
 .import-help code { background: #1a1d24; padding: 0.05rem 0.35rem; border-radius: 4px; }
 #import-file { display: block; margin-bottom: 0.9rem; color: var(--text-dim); }
 .import-log { color: var(--accent); font-size: 0.88rem; min-height: 1.2rem; white-space: pre-wrap; }
+
+/* Paste-a-list panel */
+.paste-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--surface);
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.7rem;
+  font-family: inherit;
+  font-size: 0.95rem;
+  resize: vertical;
+  margin-bottom: 0.7rem;
+}
+.paste-h {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 1.2rem 0 0.3rem;
+}
+.paste-h:first-child { margin-top: 0; }
+#quick-results { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 0.5rem; }

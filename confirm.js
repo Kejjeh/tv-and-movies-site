@@ -138,8 +138,10 @@
     state.activeTab = tab;
     const deck = document.getElementById("confirm-deck");
     const importPanel = document.getElementById("import-panel");
+    const pastePanel = document.getElementById("paste-panel");
+    deck.hidden = true; importPanel.hidden = true; pastePanel.hidden = true;
     if (tab === "import") {
-      deck.hidden = true; importPanel.hidden = false;
+      importPanel.hidden = false;
       if (!importPanel.dataset.mounted) {
         window.Import.init(importPanel, {
           knownKeys: state.knownKeys,
@@ -151,7 +153,12 @@
       }
       return;
     }
-    importPanel.hidden = true; deck.hidden = false;
+    if (tab === "paste") {
+      pastePanel.hidden = false;
+      if (!pastePanel.dataset.mounted) { mountPaste(pastePanel); pastePanel.dataset.mounted = "1"; }
+      return;
+    }
+    deck.hidden = false;
     deck.innerHTML = '<p class="search-hint">Loading…</p>';
     let cards;
     try {
@@ -289,6 +296,83 @@
     return cards.sort((a, b) => b._pop - a._pop);
   }
 
+  /* ---- Quick add + Paste: two ways to populate fast ---- */
+  function mountPaste(panel) {
+    panel.innerHTML =
+      '<h3 class="paste-h">Quick add</h3>' +
+      '<p class="search-hint">Type a title and tap a rating — no need to leave this page.</p>' +
+      '<input id="quick-search" class="paste-input" autocomplete="off" ' +
+      'placeholder="e.g. The Matrix">' +
+      '<div id="quick-results"></div>' +
+      '<h3 class="paste-h">Paste a list</h3>' +
+      '<p class="search-hint">One title per line. Bare titles are marked seen; add a ' +
+      'rating with <code>Title | loved</code>, or a year: <code>Dune (2021)</code>.</p>' +
+      '<textarea id="paste-input" rows="8" class="paste-input" ' +
+      'placeholder="The Matrix&#10;Oppenheimer | loved&#10;Heat - liked&#10;Dune (2021)"></textarea>' +
+      '<div><button id="paste-go" class="auth-btn">Add these</button></div>' +
+      '<p id="paste-log" class="search-hint"></p>';
+    panel.querySelector("#paste-go").addEventListener("click", () =>
+      runPaste(panel.querySelector("#paste-input").value, panel.querySelector("#paste-log")));
+
+    const qs = panel.querySelector("#quick-search");
+    const qr = panel.querySelector("#quick-results");
+    let timer = null;
+    qs.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => quickSearch(qs.value, qr), 300);  // debounce
+    });
+    qr.addEventListener("click", onDeckClick);  // reuse the deck's rate/skip handler
+  }
+
+  async function quickSearch(q, container) {
+    q = (q || "").trim();
+    if (q.length < 2) { container.innerHTML = ""; return; }
+    let results = [];
+    try { results = (await window.searchTmdb(q)).results || []; } catch (_) {}
+    container.innerHTML = "";
+    if (!results.length) { container.innerHTML = '<p class="search-hint">No matches.</p>'; return; }
+    for (const r of results.slice(0, 6)) {
+      const already = state.knownKeys.has(key(r.tmdb_id, r.kind));
+      const card = confirmCardEl({
+        tmdb_id: r.tmdb_id, kind: r.kind, name: r.name, year: r.year,
+        sub: already ? "already in your brain — re-rate" : "",
+      });
+      container.appendChild(card);
+    }
+  }
+
+  async function runPaste(text, log) {
+    if (!state.loggedIn) { alert("Log in (top right) to add titles."); return; }
+    const entries = window.parsePaste(text);
+    if (!entries.length) { log.textContent = "Nothing to add."; return; }
+    let added = 0, updated = 0, unmatched = 0, done = 0;
+    for (const e of entries) {
+      done++;
+      try {
+        const { results } = await window.searchTmdb(e.query);
+        let hit = (results || [])[0];
+        if (e.year && results) { const y = results.find(r => r.year === e.year); if (y) hit = y; }
+        if (!hit) { unmatched++; }
+        else {
+          const k = key(hit.tmdb_id, hit.kind);
+          // Rated entries carry 'manual' (taste-bearing); bare "seen" entries
+          // carry a passive 'manual-watched' so a big paste can't wash the profile.
+          const source = window.importSource("manual", e.rated ? 1 : null);
+          if (!state.knownKeys.has(k)) {
+            await StatusStore.queueAdd(hit.tmdb_id, hit.kind, hit.name);
+            state.knownKeys.add(k); added++;
+          } else { updated++; }
+          await StatusStore.setStatus(hit.tmdb_id, hit.kind, e.status, source);
+          state.handled.add(k); state.sessionHandled.add(k);
+        }
+      } catch (_) { unmatched++; }
+      log.textContent = `${done}/${entries.length} · ${added} added · ${updated} updated · ${unmatched} unmatched`;
+      await new Promise(r => setTimeout(r, 260));  // ~4 req/s
+    }
+    log.textContent = `Done: ${added} added, ${updated} updated, ${unmatched} unmatched. ` +
+      "Run “Reconcile now” to bake them in.";
+  }
+
   // Generic loader for a prebuilt json source (neighbors.json / probes.json).
   async function loadJsonSource(file, label, pick) {
     let payload;
@@ -308,6 +392,26 @@
   }
 
   /* ---- Deck render + actions ---- */
+  // One confirm card with status + skip buttons. Shared by the deck and the
+  // quick-add search so both render identically and the same click handler
+  // (onDeckClick) rates them.
+  function confirmCardEl(c) {
+    const fmtYear = window.formatYear || (y => (y ? ` (${y})` : ""));
+    const card = document.createElement("article");
+    card.className = "search-result confirm-card";
+    card.dataset.name = c.name;
+    card.innerHTML =
+      `<h3>${escapeHtml(c.name)}${fmtYear(c.year)}<span class="kind">${escapeHtml(window.titleCase(c.kind))}</span></h3>` +
+      (c.sub ? `<div class="confirm-sub">${escapeHtml(c.sub)}</div>` : "") +
+      `<div class="status-actions" data-tmdb="${c.tmdb_id}" data-kind="${escapeHtml(c.kind)}" data-name="${escapeHtml(c.name)}">` +
+      `<span class="status-actions-label">Seen it?</span>` +
+      STATUS_CHOICES.map(([s, label]) =>
+        `<button class="status-btn status-${s}" data-status="${s}">${label}</button>`).join("") +
+      `<button class="status-btn skip-btn" data-skip="1">Haven't seen</button>` +
+      `</div>`;
+    return card;
+  }
+
   function renderDeck(cards) {
     const deck = document.getElementById("confirm-deck");
     const count = document.getElementById("confirm-count");
@@ -317,22 +421,9 @@
       return;
     }
     count.textContent = `${cards.length} to review`;
-    const fmtYear = window.formatYear || (y => (y ? ` (${y})` : ""));
     deck.innerHTML = "";
     for (const c of cards) {
-      const card = document.createElement("article");
-      card.className = "search-result confirm-card";
-      card.dataset.name = c.name;
-      card.innerHTML =
-        `<h3>${escapeHtml(c.name)}${fmtYear(c.year)}<span class="kind">${escapeHtml(window.titleCase(c.kind))}</span></h3>` +
-        (c.sub ? `<div class="confirm-sub">${escapeHtml(c.sub)}</div>` : "") +
-        `<div class="status-actions" data-tmdb="${c.tmdb_id}" data-kind="${escapeHtml(c.kind)}" data-name="${escapeHtml(c.name)}">` +
-        `<span class="status-actions-label">Seen it?</span>` +
-        STATUS_CHOICES.map(([s, label]) =>
-          `<button class="status-btn status-${s}" data-status="${s}">${label}</button>`).join("") +
-        `<button class="status-btn skip-btn" data-skip="1">Haven't seen</button>` +
-        `</div>`;
-      deck.appendChild(card);
+      deck.appendChild(confirmCardEl(c));
     }
   }
 
