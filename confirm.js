@@ -68,7 +68,13 @@
         StatusStore.loadStatuses(), StatusStore.loadSkips(),
       ]);
       state.handled = new Set();
-      for (const k of statusMap.keys()) state.handled.add(k);
+      for (const k of statusMap.keys()) {
+        state.handled.add(k);
+        // A live Supabase status means the title IS seen/rated, even if the
+        // baked data.json doesn't know yet — without this, a bare paste line
+        // could downgrade a rating made on-site since the last nightly bake.
+        state.seenKeys.add(k);
+      }
       for (const k of skips) state.handled.add(k);
       // Keep this session's confirms/skips — a silent TOKEN_REFRESHED auth event
       // must not resurface cards the user already handled (esp. skips, which may
@@ -305,8 +311,9 @@
       'placeholder="e.g. The Matrix">' +
       '<div id="quick-results"></div>' +
       '<h3 class="paste-h">Paste a list</h3>' +
-      '<p class="search-hint">One title per line. Bare titles are marked seen; add a ' +
-      'rating with <code>Title | loved</code>, or a year: <code>Dune (2021)</code>.</p>' +
+      '<p class="search-hint">One title per line. Bare titles are marked seen (titles ' +
+      'you already rated are left alone); add a rating with <code>Title | loved</code>, ' +
+      'or a year: <code>Dune (2021)</code>.</p>' +
       '<textarea id="paste-input" rows="8" class="paste-input" ' +
       'placeholder="The Matrix&#10;Oppenheimer | loved&#10;Heat - liked&#10;Dune (2021)"></textarea>' +
       '<div><button id="paste-go" class="auth-btn">Add these</button></div>' +
@@ -345,32 +352,28 @@
     if (!state.loggedIn) { alert("Log in (top right) to add titles."); return; }
     const entries = window.parsePaste(text);
     if (!entries.length) { log.textContent = "Nothing to add."; return; }
-    let added = 0, updated = 0, unmatched = 0, done = 0;
-    for (const e of entries) {
-      done++;
-      try {
-        const { results } = await window.searchTmdb(e.query);
-        let hit = (results || [])[0];
-        if (e.year && results) { const y = results.find(r => r.year === e.year); if (y) hit = y; }
-        if (!hit) { unmatched++; }
-        else {
-          const k = key(hit.tmdb_id, hit.kind);
-          // Rated entries carry 'manual' (taste-bearing); bare "seen" entries
-          // carry a passive 'manual-watched' so a big paste can't wash the profile.
-          const source = window.importSource("manual", e.rated ? 1 : null);
-          if (!state.knownKeys.has(k)) {
-            await StatusStore.queueAdd(hit.tmdb_id, hit.kind, hit.name);
-            state.knownKeys.add(k); added++;
-          } else { updated++; }
-          await StatusStore.setStatus(hit.tmdb_id, hit.kind, e.status, source);
-          state.handled.add(k); state.sessionHandled.add(k);
-        }
-      } catch (_) { unmatched++; }
-      log.textContent = `${done}/${entries.length} · ${added} added · ${updated} updated · ${unmatched} unmatched`;
-      await new Promise(r => setTimeout(r, 260));  // ~4 req/s
-    }
-    log.textContent = `Done: ${added} added, ${updated} updated, ${unmatched} unmatched. ` +
-      "Run “Reconcile now” to bake them in.";
+    // The decide-and-write core lives in paste.js (resolvePaste, unit-tested):
+    // seen-clobber guard, person-expansion filter, provenance. This is glue.
+    const counts = await window.resolvePaste(entries, {
+      search: q => window.searchTmdb(q),
+      knownKeys: state.knownKeys,
+      seenKeys: state.seenKeys,
+      queueAdd: (id, kind, name) => StatusStore.queueAdd(id, kind, name),
+      setStatus: (id, kind, status, source) => StatusStore.setStatus(id, kind, status, source),
+      importSource: window.importSource,
+      onWrite: hit => {
+        const k = key(hit.tmdb_id, hit.kind);
+        state.handled.add(k); state.sessionHandled.add(k);
+      },
+      onProgress: (done, total, c) => {
+        log.textContent = `${done}/${total} · ${c.added} added · ${c.updated} updated · ` +
+          `${c.skipped} already rated · ${c.unmatched} unmatched · ${c.failed} failed`;
+      },
+      pace: () => new Promise(r => setTimeout(r, 260)),  // ~4 req/s
+    });
+    log.textContent = `Done: ${counts.added} added, ${counts.updated} updated, ` +
+      `${counts.skipped} already rated (skipped), ${counts.unmatched} unmatched, ` +
+      `${counts.failed} failed. Run “Reconcile now” to bake them in.`;
   }
 
   // Generic loader for a prebuilt json source (neighbors.json / probes.json).

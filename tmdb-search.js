@@ -25,6 +25,9 @@
         const key = `${o.id}|${kind}`;
         if (byKey.has(key)) {
           if (via && !byKey.get(key).via.includes(via)) byKey.get(key).via.push(via);
+          // A direct hit arriving after a person-expansion upgrades the entry:
+          // "did the title itself match the query" must not depend on order.
+          if (!via) byKey.get(key).direct = true;
           return;
         }
         const entry = {
@@ -35,6 +38,10 @@
           overview: o.overview || "",
           inSet: knownKeys.has(key),
           via: via ? [via] : [],
+          // True when the TITLE matched the query; false when the entry exists
+          // only because a matching PERSON is known for it. Status-writing
+          // consumers (paste) must ignore person-only results.
+          direct: !via,
           voteAverage: (o.vote_average != null) ? o.vote_average : null,
           genreIds: o.genre_ids || [],
         };

@@ -17,12 +17,30 @@
 
   // Merge stored statuses over the title list. A stored status marks the title
   // seen and derives `loved`. Returns a new array; inputs are not mutated.
+  //
+  // Map values are {status, source} rows (loadStatuses) — source flows onto
+  // the merged title so a passive import (ok + '*-watched') stays passive
+  // client-side instead of calibrating the taste profile until the next bake.
+  // A plain-string value (the optimistic one-tap edit path) means an explicit
+  // on-site rating: hand-curated by design, so source clears to null.
   function applyStatuses(titles, statusMap) {
     return titles.map(t => {
-      const s = statusMap.get(statusKey(t.tmdb_id, t.kind));
-      if (s == null) return t;
-      return { ...t, seen: true, status: s, loved: s === "loved" };
+      const v = statusMap.get(statusKey(t.tmdb_id, t.kind));
+      if (v == null) return t;
+      const s = typeof v === "string" ? v : v.status;
+      const source = typeof v === "string" ? null : (v.source != null ? v.source : null);
+      return { ...t, seen: true, status: s, loved: s === "loved", source };
     });
+  }
+
+  // Rows -> Map keyed by statusKey, keeping provenance. Pure; unit-tested.
+  function statusMapFromRows(rows) {
+    const map = new Map();
+    for (const r of rows) {
+      map.set(statusKey(r.tmdb_id, r.kind),
+        { status: r.status, source: r.source != null ? r.source : null });
+    }
+    return map;
   }
 
   // ---- Supabase I/O (browser only) ------------------------------------
@@ -52,10 +70,15 @@
   }
 
   async function loadStatuses() {
-    const rows = await loadAllRows("statuses", "tmdb_id,kind,status");
-    const map = new Map();
-    for (const r of rows) map.set(statusKey(r.tmdb_id, r.kind), r.status);
-    return map;
+    // Prefer the provenance-carrying select; fall back to the pre-migration
+    // shape (no source column -> PostgREST 400) so an un-migrated table
+    // degrades to source-less rows instead of losing the whole overlay.
+    // setStatus below makes the same allowance when writing.
+    try {
+      return statusMapFromRows(await loadAllRows("statuses", "tmdb_id,kind,status,source"));
+    } catch (_) {
+      return statusMapFromRows(await loadAllRows("statuses", "tmdb_id,kind,status"));
+    }
   }
 
   async function setStatus(tmdbId, kind, status, source) {
@@ -129,7 +152,7 @@
   }
 
   const API = {
-    statusKey, applyStatuses,
+    statusKey, applyStatuses, statusMapFromRows,
     init, loadStatuses, setStatus, clearStatus, queueAdd, triggerReconcile,
     markSkipped, loadSkips,
     signIn, signOut, currentUser,

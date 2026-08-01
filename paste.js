@@ -57,8 +57,65 @@
     return [...byKey.values()];
   }
 
+  /* resolvePaste — the decide-and-write core behind "Add these".
+
+     Kept here (pure, dependency-injected) rather than in confirm.js so the
+     guard logic is unit-tested; confirm.js only wires the real search /
+     StatusStore / DOM progress line into `deps`:
+       {search, knownKeys, seenKeys, queueAdd, setStatus, importSource,
+        onProgress?, pace?}
+     Returns {added, updated, skipped, unmatched, failed}. */
+  async function resolvePaste(entries, deps) {
+    const counts = { added: 0, updated: 0, skipped: 0, unmatched: 0, failed: 0 };
+    let done = 0;
+    for (const e of entries) {
+      done++;
+      try {
+        const { results } = await deps.search(e.query);
+        const k = hit => `${hit.tmdb_id}|${hit.kind}`;
+        // Only results whose TITLE matched the query. /search/multi expands
+        // matching PEOPLE into their known-for titles (direct: false) — a
+        // pasted director's name must not mark their films seen. Results
+        // from a source that doesn't tag direct (typed search) all pass.
+        const direct = (results || []).filter(r => r.direct !== false);
+        let hit = direct[0];
+        if (e.year) {
+          const y = direct.find(r => r.year === e.year);
+          if (y) hit = y;
+        }
+        if (!hit) { counts.unmatched++; }
+        else if (!e.rated && deps.seenKeys.has(k(hit))) {
+          // Already seen with a status we trust — a bare "watched" mention
+          // must not downgrade it (mirror of import.js's seenKeys guard).
+          counts.skipped++;
+        } else {
+          // Rated entries carry 'manual' (taste-bearing); bare "seen" entries
+          // a passive 'manual-watched' so a big paste can't wash the profile.
+          const source = deps.importSource("manual", e.rated ? 1 : null);
+          const kk = k(hit);
+          const wasKnown = deps.knownKeys.has(kk);
+          if (!wasKnown) await deps.queueAdd(hit.tmdb_id, hit.kind, hit.name);
+          await deps.setStatus(hit.tmdb_id, hit.kind, e.status, source);
+          // Book-keeping only AFTER the durable write: a failure mid-pair
+          // must not leave phantom counts or a poisoned knownKeys that makes
+          // a retry report "updated" for a title that never landed.
+          if (wasKnown) counts.updated++;
+          else { deps.knownKeys.add(kk); counts.added++; }
+          // The title is seen NOW — a bare duplicate later in this run (or a
+          // second paste this session) must skip, not downgrade it.
+          deps.seenKeys.add(kk);
+          if (deps.onWrite) deps.onWrite(hit);
+        }
+      } catch (_) { counts.failed++; }
+      if (deps.onProgress) deps.onProgress(done, entries.length, counts);
+      if (deps.pace) await deps.pace();
+    }
+    return counts;
+  }
+
   global.parsePaste = parsePaste;
+  global.resolvePaste = resolvePaste;
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { parsePaste };
+    module.exports = { parsePaste, resolvePaste };
   }
 })(typeof globalThis !== "undefined" ? globalThis : this);
