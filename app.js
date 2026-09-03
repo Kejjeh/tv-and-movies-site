@@ -558,4 +558,10 @@ function render() {
 
 /* escapeHtml is provided by ui.js (loaded first). */
 
-load();
+// A rejected load (bad deploy, offline, malformed data.json) used to leave the
+// page on "Loading data…" forever with only an unhandled rejection in the
+// console. Surface it where the user is already looking.
+load().catch(err => {
+  const el = document.getElementById("subtitle");
+  if (el) el.textContent = "Couldn't load data.json — try reloading. (" + (err && err.message || err) + ")";
+});

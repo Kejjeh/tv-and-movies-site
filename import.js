@@ -133,11 +133,25 @@
       const logEl = root.querySelector("#import-log");
       const log = msg => { logEl.textContent = msg; };
 
+      let importing = false;
       root.querySelector("#import-file").addEventListener("change", async e => {
         const file = e.target.files && e.target.files[0];
         if (!file) return;
         if (!isLoggedIn()) { log("Log in (top right) before importing."); return; }
-        const text = await file.text();
+        // Picking a second CSV mid-run used to start a second loop sharing
+        // knownKeys/seenKeys and the same log line.
+        if (importing) { log("An import is already running — wait for it to finish."); return; }
+        importing = true;
+        const fileEl = e.target;
+        fileEl.disabled = true;
+        try {
+        let text;
+        try { text = await file.text(); }
+        catch (err) {
+          // An unreadable file used to reject the async listener with zero UI.
+          log("Couldn't read that file: " + (err && err.message || err));
+          return;
+        }
         const records = parseCsv(text);
         const fmt = detectFormat(records);
         if (!fmt) { log("Unrecognized CSV — need an IMDb or Letterboxd export."); return; }
@@ -189,6 +203,11 @@
         }
         log(`Done: ${added} rated, ${skipped} already seen, ${unmatched} unmatched. ` +
           `Run “Reconcile now” to bake them in.`);
+        } finally {
+          importing = false;
+          fileEl.disabled = false;
+          fileEl.value = "";   // let the same file be re-picked after a fix
+        }
       });
     };
   }

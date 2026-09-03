@@ -167,12 +167,27 @@
     deck.hidden = false;
     deck.innerHTML = '<p class="search-hint">Loading…</p>';
     let cards;
+    // Two guards for slow sources (Franchises fires up to 15 live TMDb calls):
+    // an in-flight promise so a double-click can't launch a second run, and a
+    // post-await tab check so a source that resolves late can't paint its
+    // cards under a different, already-selected tab.
     try {
-      cards = state.cache[tab] || (state.cache[tab] = await SOURCES[tab]());
+      if (state.cache[tab]) {
+        cards = state.cache[tab];
+      } else {
+        state.inflight = state.inflight || {};
+        if (!state.inflight[tab]) state.inflight[tab] = SOURCES[tab]();
+        cards = await state.inflight[tab];
+        delete state.inflight[tab];
+        state.cache[tab] = cards;
+      }
     } catch (e) {
+      if (state.inflight) delete state.inflight[tab];
+      if (state.activeTab !== tab) return;
       deck.innerHTML = `<p class="search-hint">Could not load this source: ${escapeHtml(e.message || String(e))}</p>`;
       return;
     }
+    if (state.activeTab !== tab) return;   // the user moved on while we waited
     const hide = OWN_TABS.has(tab) ? state.sessionHandled : state.handled;
     renderDeck(cards.filter(c => !hide.has(key(c.tmdb_id, c.kind))));
   }
@@ -225,6 +240,10 @@
       .sort((a, b) => b.count - a.count).slice(0, 8);
 
     const cards = [];
+    // Deduped across ALL auteurs, not per-auteur: a title two followed
+    // creators share (the Coens, a writer/director pair) used to render twice,
+    // and rating one left the twin on screen writing a redundant upsert.
+    const emitted = new Set();
     for (const a of auteurs) {
       let credits;
       try { credits = await window.fetchCombinedCredits(a.id); }
@@ -236,7 +255,7 @@
         if (!kind) continue;
         if ((c.vote_count || 0) < 200) continue;
         const k = key(c.id, kind);
-        if (state.knownKeys.has(k) || byId.has(k)) continue;
+        if (state.knownKeys.has(k) || byId.has(k) || emitted.has(k)) continue;
         byId.set(k, {
           tmdb_id: c.id, kind, name: c.name || c.title || "?",
           year: Number((c.first_air_date || c.release_date || "").slice(0, 4)) || null,
@@ -244,7 +263,9 @@
           _pop: c.popularity || 0,
         });
       }
-      cards.push(...[...byId.values()].sort((x, y) => y._pop - x._pop).slice(0, 15));
+      const picked = [...byId.values()].sort((x, y) => y._pop - x._pop).slice(0, 15);
+      for (const c of picked) emitted.add(key(c.tmdb_id, c.kind));
+      cards.push(...picked);
     }
     return cards;
   }
@@ -318,8 +339,23 @@
       'placeholder="The Matrix&#10;Oppenheimer | loved&#10;Heat - liked&#10;Dune (2021)"></textarea>' +
       '<div><button id="paste-go" class="auth-btn">Add these</button></div>' +
       '<p id="paste-log" class="search-hint"></p>';
-    panel.querySelector("#paste-go").addEventListener("click", () =>
-      runPaste(panel.querySelector("#paste-input").value, panel.querySelector("#paste-log")));
+    const goBtn = panel.querySelector("#paste-go");
+    goBtn.addEventListener("click", async () => {
+      // Guard re-entry: a second click used to start a second loop over the
+      // same entries — two interleaved pacers, duplicate TMDb calls, and a
+      // progress line flickering between two counters.
+      if (goBtn.disabled) return;
+      goBtn.disabled = true;
+      const original = goBtn.textContent;
+      goBtn.textContent = "Adding…";
+      try {
+        await runPaste(panel.querySelector("#paste-input").value,
+                       panel.querySelector("#paste-log"));
+      } finally {
+        goBtn.disabled = false;
+        goBtn.textContent = original;
+      }
+    });
 
     const qs = panel.querySelector("#quick-search");
     const qr = panel.querySelector("#quick-results");
@@ -331,11 +367,18 @@
     qr.addEventListener("click", onDeckClick);  // reuse the deck's rate/skip handler
   }
 
+  // Monotonic token: only the newest quick-search may paint. Debouncing alone
+  // coalesces keystrokes but doesn't order the requests that DO fire — a slow
+  // "the" could land after "the matrix" and overwrite it.
+  let quickSearchSeq = 0;
+
   async function quickSearch(q, container) {
     q = (q || "").trim();
+    const mySeq = ++quickSearchSeq;
     if (q.length < 2) { container.innerHTML = ""; return; }
     let results = [];
     try { results = (await window.searchTmdb(q)).results || []; } catch (_) {}
+    if (mySeq !== quickSearchSeq) return;   // a newer search superseded us
     container.innerHTML = "";
     if (!results.length) { container.innerHTML = '<p class="search-hint">No matches.</p>'; return; }
     for (const r of results.slice(0, 6)) {

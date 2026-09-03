@@ -60,20 +60,25 @@
     const peopleOverlap = totalW > 0 ? Math.max(0, Math.min(1.0, matchedW / totalW)) : 0;
 
     // tone / genre / narrative: preference affinity, not set-membership fraction.
-    const toneMatch = affinityScore(cand.tone_tags, profile.toneAffinity);
-    const genreFit = affinityScore(cand.genres, profile.genreAffinity);
+    // All three default to [] — a web-ingested title can arrive without
+    // tone_tags or genres, and Python tolerates None here (scoring.py's
+    // `or []`). Dereferencing them directly blanked the whole page.
+    const candTones = cand.tone_tags || [];
+    const candGenres = cand.genres || [];
     const candNarratives = cand.narratives || [];
+    const toneMatch = affinityScore(candTones, profile.toneAffinity);
+    const genreFit = affinityScore(candGenres, profile.genreAffinity);
     const narrativeMatch = affinityScore(candNarratives, profile.narrativeAffinity);
     // Still surfaced in reason strings (presentation only).
     const seenNarratives = profile.seenNarratives;
-    const sharedTones = cand.tone_tags.filter(t => seenTones.has(t));
-    const sharedGenres = cand.genres.filter(g => seenGenres.has(g));
+    const sharedTones = candTones.filter(t => seenTones.has(t));
+    const sharedGenres = candGenres.filter(g => seenGenres.has(g));
     const sharedNarratives = candNarratives.filter(n => seenNarratives.has(n));
 
     let moodMatch = 0.5;
     let moodMatched = [];
     if (mood.length > 0) {
-      moodMatched = mood.filter(m => cand.tone_tags.includes(m));
+      moodMatched = mood.filter(m => candTones.includes(m));
       moodMatch = moodMatched.length / mood.length;
     }
 

@@ -32,8 +32,12 @@ async function init() {
     return;
   }
   state.data = await res.json();
+  // generated_at is optional in older bundles — don't let a missing field
+  // take down the whole page on a .slice of undefined.
+  const stamp = (state.data.generated_at || "").slice(0, 10);
   document.getElementById("subtitle").textContent =
-    `${state.data.works.length} works · ${state.data.people.length} of your creative people · generated ${state.data.generated_at.slice(0,10)}`;
+    `${state.data.works.length} works · ${state.data.people.length} of your creative people` +
+    (stamp ? ` · generated ${stamp}` : "");
   bindControls();
   render();
 }
@@ -221,4 +225,7 @@ function tooltip(w) {
 }
 /* escapeHtml is provided by ui.js (loaded first). */
 
-init();
+init().catch(err => {
+  const el = document.getElementById("subtitle");
+  if (el) el.textContent = "Couldn't load discovery.json — try reloading. (" + (err && err.message || err) + ")";
+});

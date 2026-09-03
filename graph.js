@@ -213,37 +213,10 @@ function makeNodeTooltip(t) {
 }
 
 function buildEdges(titles) {
-  const titleIds = new Set(titles.map(t => t.tmdb_id));
-
-  // person.id -> { name, appearances: [{titleId, role}] }
-  const persons = new Map();
-  for (const t of titles) {
-    for (const p of t.people) {
-      if (!state.roles.has(p.role)) continue;
-      if (!persons.has(p.id)) persons.set(p.id, { name: p.name, appearances: [] });
-      persons.get(p.id).appearances.push({ titleId: t.tmdb_id, role: p.role });
-    }
-  }
-
-  // pair-key -> { people: [{id, name, role}], weight }
-  const pairs = new Map();
-  for (const [pid, info] of persons) {
-    if (info.appearances.length < 2) continue;
-    for (let i = 0; i < info.appearances.length; i++) {
-      for (let j = i + 1; j < info.appearances.length; j++) {
-        const ai = info.appearances[i], aj = info.appearances[j];
-        if (!titleIds.has(ai.titleId) || !titleIds.has(aj.titleId)) continue;
-        const a = Math.min(ai.titleId, aj.titleId);
-        const b = Math.max(ai.titleId, aj.titleId);
-        const key = `${a}|${b}`;
-        if (!pairs.has(key)) pairs.set(key, { people: [], weight: 0 });
-        const entry = pairs.get(key);
-        const roleWeight = (state.data.role_weights[ai.role] ?? 1.0);
-        entry.people.push({ id: pid, name: info.name, role: ai.role });
-        entry.weight += roleWeight;
-      }
-    }
-  }
+  // The pairing itself lives in graph-edges.js (pure, unit-tested): one
+  // credit per (person, title) so a multi-role person can't self-loop a
+  // title or count several times toward the min-shared-people filter.
+  const pairs = GraphEdges.titlePairs(titles, state.roles, state.data.role_weights);
 
   const edges = [];
   for (const [key, info] of pairs) {
@@ -454,8 +427,23 @@ function resetPanelHeaders() {
 
 function showDetails(nodeId) {
   resetPanelHeaders();
+  // The person panel lists ALL of a person's titles (peopleIndex is built from
+  // the unfiltered seen-set), so a title-link can point at a node the current
+  // kind filter excludes — dereferencing it killed the whole panel.
+  const node = state.nodes.get(nodeId);
+  if (!node) {
+    document.getElementById("d-title").textContent = "Not in the current view";
+    document.getElementById("d-meta").textContent =
+      "This title is hidden by the movies/TV filter — clear the filter to see it.";
+    for (const id of ["d-tones", "d-genres"]) {
+      document.getElementById(id).textContent = "—";
+    }
+    document.getElementById("d-people").innerHTML = "";
+    document.getElementById("details").classList.remove("hidden");
+    return;
+  }
   state.selectedId = nodeId;
-  const t = state.nodes.get(nodeId)._payload;
+  const t = node._payload;
   document.getElementById("d-title").textContent = `${t.name}${t.year ? ` (${t.year})` : ""}`;
   const metaBits = [t.kind];
   if (t.imdb_rating) metaBits.push(`IMDb ${t.imdb_rating}`);
@@ -635,4 +623,7 @@ function showPerson(personId) {
 
 /* escapeHtml is provided by ui.js (loaded first). */
 
-load();
+load().catch(err => {
+  const el = document.getElementById("subtitle");
+  if (el) el.textContent = "Couldn't load data.json — try reloading. (" + (err && err.message || err) + ")";
+});

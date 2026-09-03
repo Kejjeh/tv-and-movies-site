@@ -8,6 +8,11 @@
  */
 const CACHE = "tvbrain-v1";
 
+// Don't fill the cache with the giant data bundles on every page view —
+// discovery.json alone is ~4.7 MB and data.json ~0.8 MB, and the offline
+// shell doesn't need them. They still work online (network-first).
+const NO_CACHE = /\/(discovery|neighbors|probes|filmographies)\.json$/;
+
 self.addEventListener("install", () => self.skipWaiting());
 
 self.addEventListener("activate", (e) => {
@@ -24,10 +29,22 @@ self.addEventListener("fetch", (e) => {
   e.respondWith(
     fetch(req)
       .then(res => {
-        const copy = res.clone();
-        caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
+        if (!NO_CACHE.test(new URL(req.url).pathname)) {
+          const copy = res.clone();
+          caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
+        }
         return res;
       })
-      .catch(() => caches.match(req))
+      .catch(async err => {
+        // caches.match resolves to UNDEFINED on a miss, and respondWith
+        // rejects with an opaque TypeError when handed undefined. Return a
+        // real response so an offline miss reads as an offline miss.
+        const hit = await caches.match(req);
+        if (hit) return hit;
+        return new Response(
+          "Offline and this request isn't cached.",
+          { status: 504, statusText: "Offline", headers: { "Content-Type": "text/plain" } },
+        );
+      })
   );
 });
