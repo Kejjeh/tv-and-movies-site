@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
   <title>Search &mdash; TV &amp; Movies Brain</title>
-  <link rel="stylesheet" href="styles.css?v=14">
+  <link rel="stylesheet" href="styles.css?v=21">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#12141c">
   <link rel="apple-touch-icon" href="icon-192.png">
@@ -23,6 +23,7 @@
         <a href="search.html" class="active">Search</a>
       </nav>
       <div id="auth" class="auth"></div>
+      <div id="outbox" class="outbox" hidden></div>
     </div>
     <p class="subtitle">Look up anything in your catalogue by title or by a person in the credits.</p>
   </header>
@@ -121,11 +122,13 @@
   </main>
 
   <script src="vendor/supabase-js-2.110.0.min.js"></script>
-  <script src="supabase-config.js?v=14"></script>
-  <script src="status-store.js?v=14"></script>
-  <script src="ui.js?v=14"></script>
-  <script src="tmdb-config.js?v=14"></script>
-  <script src="tmdb-search.js?v=14"></script>
-  <script src="search.js?v=14"></script>
+  <script src="supabase-config.js?v=21"></script>
+  <script src="status-store.js?v=21"></script>
+  <script src="ui.js?v=21"></script>
+  <script src="tmdb-config.js?v=21"></script>
+  <script src="tmdb-search.js?v=21"></script>
+  <script src="write-queue.js?v=21"></script>
+  <script src="status-edit.js?v=21"></script>
+  <script src="search.js?v=21"></script>
 </body>
 </html>

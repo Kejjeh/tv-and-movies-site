@@ -118,10 +118,18 @@
   }
 
   // Queue a universe title for the reconcile job to ingest into brain.db.
+  //
+  // ignoreDuplicates (ON CONFLICT DO NOTHING) rather than a merging upsert:
+  // re-queuing a title already in the queue has nothing to update — ingest
+  // reads only (tmdb_id, kind) — and a merging upsert needs an UPDATE policy
+  // the documented `queue` table never had (SETUP.md creates read/insert/
+  // delete only). Without this, confirming a title queued earlier is refused
+  // with RLS 42501 and the whole confirm, rating included, is lost.
   async function queueAdd(tmdbId, kind, name) {
     const { error } = await client
       .from("queue")
-      .upsert({ tmdb_id: tmdbId, kind, name, requested_at: new Date().toISOString() });
+      .upsert({ tmdb_id: tmdbId, kind, name, requested_at: new Date().toISOString() },
+              { ignoreDuplicates: true });
     if (error) throw error;
   }
 
@@ -151,8 +159,19 @@
     return (data && data.user) || null;
   }
 
+  // The transport the durable outbox (write-queue.js) drives: one entry per
+  // op name, each taking the flat args the queue persists. Keeping the
+  // arg-shape mapping here means the outbox never learns Supabase's API.
+  function writeTransport() {
+    return {
+      setStatus: a => setStatus(a.tmdbId, a.kind, a.status, a.source),
+      queueAdd: a => queueAdd(a.tmdbId, a.kind, a.name),
+      markSkipped: a => markSkipped(a.tmdbId, a.kind),
+    };
+  }
+
   const API = {
-    statusKey, applyStatuses, statusMapFromRows,
+    statusKey, applyStatuses, statusMapFromRows, writeTransport,
     init, loadStatuses, setStatus, clearStatus, queueAdd, triggerReconcile,
     markSkipped, loadSkips,
     signIn, signOut, currentUser,

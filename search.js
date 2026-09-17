@@ -251,6 +251,7 @@
     const RAW_TITLES = titles;
     let statusMap = new Map();
     let loggedIn = false;
+    let writes = null;      // the durable outbox (web/write-queue.js)
 
     const runCatalogue = () => {
       const filters = collectFilters();
@@ -318,6 +319,11 @@
       let user = null;
       try { user = await StatusStore.currentUser(); } catch (_) {}
       loggedIn = !!user;
+      // See app.js: don't replay a restored outbox at a logged-out client,
+      // and never under an account other than the one that queued it.
+      // ...and stop it on sign-out, so no completion from the ended session
+      // can reach the next account's outbox. See app.js for the long note.
+      if (writes) { if (loggedIn) writes.start(user.id); else writes.stop(); }
       if (loggedIn) {
         el.innerHTML = `<span class="auth-who">${global.escapeHtml(user.email)}</span>` +
           `<button class="auth-btn" id="reconcile">Reconcile now</button>` +
@@ -350,8 +356,12 @@
       if (!global.StatusStore || !global.SUPABASE_URL) return;
       try {
         const sb = StatusStore.init(global.SUPABASE_URL, global.SUPABASE_ANON_KEY);
+        writes = WriteQueue.createWriteQueue({
+          transport: StatusStore.writeTransport(),
+          onChange: st => renderOutbox(document.getElementById("outbox"), st, writes),
+        });
         sb.auth.onAuthStateChange(() => { refreshAuthUI(); reloadStatuses(); });
-        statusMap = await StatusStore.loadStatuses();
+        StatusEdit.mergeServerStatuses(statusMap, await StatusStore.loadStatuses(), []);
         titles = StatusStore.applyStatuses(RAW_TITLES, statusMap);
         knownKeys.clear();
         for (const t of titles) knownKeys.add(`${t.tmdb_id}|${t.kind}`);
@@ -361,31 +371,47 @@
 
     async function reloadStatuses() {
       try {
-        statusMap = await StatusStore.loadStatuses();
+        // In place, holding keys the outbox still owes — see app.js's copy.
+        StatusEdit.mergeServerStatuses(
+          statusMap, await StatusStore.loadStatuses(),
+          writes ? writes.state().pendingKeys : []);
         titles = StatusStore.applyStatuses(RAW_TITLES, statusMap);
         run();
       } catch (_) {}
     }
 
-    async function markStatus(tmdbId, kind, status) {
-      if (!loggedIn) { alert("Log in (top right) to save your ratings."); return; }
-      statusMap.set(StatusStore.statusKey(tmdbId, kind), status);
-      titles = StatusStore.applyStatuses(RAW_TITLES, statusMap);
-      run();
-      try { await StatusStore.setStatus(tmdbId, kind, status); }
-      catch (e) { alert("Save failed: " + (e.message || e)); }
+    // Glue only — see app.js's copy and web/status-edit.js.
+    function markStatus(tmdbId, kind, status) {
+      return StatusEdit.markStatus({
+        isLoggedIn: () => loggedIn,
+        statusMap,
+        statusKey: StatusStore.statusKey,
+        submit: ops => (writes
+          ? writes.submit(ops)
+          : Promise.resolve({ ok: false, permanent: true, error: new Error("not connected") })),
+        repaint: () => { titles = StatusStore.applyStatuses(RAW_TITLES, statusMap); run(); },
+        notify: msg => alert(msg),
+      }, tmdbId, kind, status);
     }
 
+    // "Add to brain" on a universe result. Through the outbox like every other
+    // write: the button reads Queued the moment you tap it, and only goes back
+    // if the write is permanently refused (a flaky connection is retried).
     async function queueAdd(btn) {
       if (!loggedIn) { alert("Log in (top right) to add titles."); return; }
+      const tmdbId = Number(btn.dataset.tmdb);
+      const kind = btn.dataset.kind;
+      const label = btn.textContent;
       btn.disabled = true;
-      try {
-        await StatusStore.queueAdd(Number(btn.dataset.tmdb), btn.dataset.kind, btn.dataset.name);
-        btn.textContent = "Queued ✓";
-      } catch (e) {
-        btn.disabled = false;
-        alert("Could not queue: " + (e.message || e));
-      }
+      btn.textContent = "Queued ✓";
+      const result = writes
+        ? await writes.submit([{ op: "queueAdd", key: `${tmdbId}|${kind}`,
+                                 args: { tmdbId, kind, name: btn.dataset.name } }])
+        : { ok: false, error: new Error("not connected") };
+      if (result.ok) return;
+      btn.disabled = false;
+      btn.textContent = label;
+      alert("Could not queue: " + ((result.error && result.error.message) || result.error));
     }
 
     out.addEventListener("click", e => {

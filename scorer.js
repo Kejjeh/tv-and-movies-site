@@ -75,11 +75,19 @@
     const sharedGenres = candGenres.filter(g => seenGenres.has(g));
     const sharedNarratives = candNarratives.filter(n => seenNarratives.has(n));
 
+    // Dedupe to mirror Python's `set(mood)` (brain/scoring.py::_mood_score).
+    // Dividing by the RAW length diverged from the Python scorer whenever the
+    // caller passed a repeated tone: mood ["surreal","surreal","weird"] over a
+    // candidate tagged only "surreal" scored 2/3 here and 1/2 there. Today's
+    // chips are a Set so the UI can't produce one, but scoreCandidate is a
+    // shared seam and the two engines must agree for every input, not just
+    // the ones one caller happens to send (ADR 0002).
+    const moodTones = [...new Set(mood)];
     let moodMatch = 0.5;
     let moodMatched = [];
-    if (mood.length > 0) {
-      moodMatched = mood.filter(m => candTones.includes(m));
-      moodMatch = moodMatched.length / mood.length;
+    if (moodTones.length > 0) {
+      moodMatched = moodTones.filter(m => candTones.includes(m));
+      moodMatch = moodMatched.length / moodTones.length;
     }
 
     const breakdown = {
@@ -119,7 +127,7 @@
       pairs.push([c, `Shared genres: ${[...sharedGenres].sort().join(", ")}`]);
     }
     if (moodMatched.length > 0) {
-      const c = moodMatched.length / mood.length * weights.mood_match;
+      const c = moodMatched.length / moodTones.length * weights.mood_match;
       pairs.push([c, `Mood match: ${[...moodMatched].sort().join(", ")}`]);
     }
     if (sharedNarratives.length > 0) {

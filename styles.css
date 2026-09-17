@@ -555,3 +555,17 @@ main.confirm-layout { max-width: 900px; }
 }
 .paste-h:first-child { margin-top: 0; }
 #quick-results { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 0.5rem; }
+
+/* Unsaved-writes indicator (web/write-queue.js). Hidden whenever the outbox
+   is empty, so the steady state stays quiet. */
+.outbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+}
+.outbox[hidden] { display: none; }
+.outbox-pending { background: #2b3140; color: #c9d1e0; }
+.outbox-error   { background: #4a2328; color: #f2c7cc; }

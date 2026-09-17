@@ -34,6 +34,10 @@
     cache: {},             // tab id -> rendered card list (lazy)
   };
 
+  // The durable outbox every confirm / skip / queue-add goes through
+  // (web/write-queue.js). Null until Supabase init succeeds.
+  let writes = null;
+
   async function init() {
     try {
       const r = await fetch("data.json");
@@ -56,6 +60,10 @@
     if (!window.StatusStore || !window.SUPABASE_URL) return;
     try {
       const sb = StatusStore.init(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+      writes = WriteQueue.createWriteQueue({
+        transport: StatusStore.writeTransport(),
+        onChange: st => renderOutbox(document.getElementById("outbox"), st, writes),
+      });
       sb.auth.onAuthStateChange(() => { refreshAuthUI(); reloadOverlay(); });
       await reloadOverlay();
     } catch (e) { console.warn("status init failed:", e); }
@@ -91,6 +99,12 @@
     let user = null;
     try { user = await StatusStore.currentUser(); } catch (_) {}
     state.loggedIn = !!user;
+    // Only drain the outbox once there's a session — a write replayed at a
+    // logged-out client is refused and dead-lettered for nothing, and one
+    // replayed under another account would write their ratings into this one.
+    // ...and stop it on sign-out, so no completion from the ended session
+    // can reach the next account's outbox. See app.js for the long note.
+    if (writes) { if (state.loggedIn) writes.start(user.id); else writes.stop(); }
     if (state.loggedIn) {
       el.innerHTML = `<span class="auth-who">${escapeHtml(user.email)}</span>` +
         `<button class="auth-btn" id="reconcile">Reconcile now</button>` +
@@ -485,34 +499,36 @@
     else confirmSeen(tmdbId, kind, name, btn.dataset.status, wrap);
   }
 
-  async function confirmSeen(tmdbId, kind, name, status, wrap) {
-    if (!state.loggedIn) { alert("Log in (top right) to confirm."); return; }
-    dropCard(tmdbId, kind, wrap);   // optimistic
-    try {
-      // Queue first (so ingest adds the row) THEN status (so sync marks it seen).
-      await StatusStore.queueAdd(tmdbId, kind, name);
-      await StatusStore.setStatus(tmdbId, kind, status);
-    } catch (e) {
-      // Roll the optimistic drop back so the card returns and can be retried.
-      const k = key(tmdbId, kind);
-      state.handled.delete(k);
-      state.sessionHandled.delete(k);
-      showTab(state.activeTab);   // cards are cached — cheap re-render
-      alert("Save failed: " + (e.message || e));
-    }
+  // The decisions themselves live in web/confirm-actions.js (ordering,
+  // rollback, reporting); this supplies the DOM half. `wrap` is captured so
+  // the right card disappears even if the deck re-renders underneath.
+  function actionDeps(wrap) {
+    return {
+      isLoggedIn: () => state.loggedIn,
+      submit: ops => (writes
+        ? writes.submit(ops)
+        : Promise.resolve({ ok: false, permanent: true, error: new Error("not connected") })),
+      markHandled: k => { markHandled(k); dropCard(wrap); },
+      unmarkHandled: k => { state.handled.delete(k); state.sessionHandled.delete(k); },
+      restore: () => showTab(state.activeTab),   // cards are cached — cheap re-render
+      notify: msg => alert(msg),
+    };
   }
 
-  async function skip(tmdbId, kind, wrap) {
-    if (!state.loggedIn) { alert("Log in (top right) to skip."); return; }
-    dropCard(tmdbId, kind, wrap);
-    try { await StatusStore.markSkipped(tmdbId, kind); }
-    catch (e) { /* skip is best-effort */ }
+  function confirmSeen(tmdbId, kind, name, status, wrap) {
+    return ConfirmActions.confirmSeen(actionDeps(wrap), { tmdbId, kind, name, status });
   }
 
-  function dropCard(tmdbId, kind, wrap) {
-    const k = key(tmdbId, kind);
+  function skip(tmdbId, kind, wrap) {
+    return ConfirmActions.skipTitle(actionDeps(wrap), { tmdbId, kind });
+  }
+
+  function markHandled(k) {
     state.handled.add(k);
     state.sessionHandled.add(k);
+  }
+
+  function dropCard(wrap) {
     const card = wrap.closest(".confirm-card");
     if (card) card.remove();
     const count = document.getElementById("confirm-count");

@@ -31,6 +31,8 @@ let STATUS_AFFINITY = null;
 let RAW_TITLES = [];
 let STATUS_MAP = new Map();
 let loggedIn = false;
+// The durable outbox every rating goes through (web/write-queue.js).
+let WRITES = null;
 // Buttons offered per card. "ok" reads as "seen" (watched, no strong reaction).
 const STATUS_CHOICES = [
   ["loved", "loved"], ["liked", "liked"], ["ok", "seen"],
@@ -92,10 +94,14 @@ async function initStatuses() {
   if (!window.StatusStore || !window.SUPABASE_URL) return;
   try {
     const sb = StatusStore.init(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+    WRITES = WriteQueue.createWriteQueue({
+      transport: StatusStore.writeTransport(),
+      onChange: st => renderOutbox(document.getElementById("outbox"), st, WRITES),
+    });
     // Re-merge + refresh the auth bar whenever login state changes
     // (e.g. when the magic-link redirect lands).
     sb.auth.onAuthStateChange(() => { refreshAuthUI(); reloadStatuses(); });
-    STATUS_MAP = await StatusStore.loadStatuses();
+    StatusEdit.mergeServerStatuses(STATUS_MAP, await StatusStore.loadStatuses(), []);
     DATA.titles = StatusStore.applyStatuses(RAW_TITLES, STATUS_MAP);
   } catch (e) {
     console.warn("status load failed:", e);
@@ -105,7 +111,10 @@ async function initStatuses() {
 
 async function reloadStatuses() {
   try {
-    STATUS_MAP = await StatusStore.loadStatuses();
+    const server = await StatusStore.loadStatuses();
+    // Merge in place — see StatusEdit.mergeServerStatuses. Rebinding STATUS_MAP
+    // here orphaned any edit still in flight.
+    StatusEdit.mergeServerStatuses(STATUS_MAP, server, WRITES ? WRITES.state().pendingKeys : []);
     DATA.titles = StatusStore.applyStatuses(RAW_TITLES, STATUS_MAP);
     render();
   } catch (_) {}
@@ -117,6 +126,14 @@ async function refreshAuthUI() {
   let user = null;
   try { user = await StatusStore.currentUser(); } catch (_) {}
   loggedIn = !!user;
+  // Only drain the outbox once we know WHO is signed in: a restored write
+  // replayed at a logged-out client is refused and dead-lettered for nothing,
+  // and one replayed under a different account would write their ratings into
+  // this one. The outbox is bucketed per account id for exactly that reason.
+  // ...and hand it back on sign-out: a signed-out tab that keeps draining
+  // retries a dead session's writes for nothing, and leaves that account's
+  // stored outbox writable by whatever lands after the session ended.
+  if (WRITES) { if (loggedIn) WRITES.start(user.id); else WRITES.stop(); }
   if (loggedIn) {
     el.innerHTML = `<span class="auth-who">${escapeHtml(user.email)}</span>` +
       `<button class="auth-btn" id="logout">log out</button>`;
@@ -140,19 +157,27 @@ async function refreshAuthUI() {
   }
 }
 
-async function markStatus(tmdbId, kind, status) {
-  if (!loggedIn) {
-    alert("Log in (top right) to save your ratings.");
-    return;
-  }
-  STATUS_MAP.set(StatusStore.statusKey(tmdbId, kind), status);
-  DATA.titles = StatusStore.applyStatuses(RAW_TITLES, STATUS_MAP);
-  render();  // optimistic — the marked title leaves the candidate list
-  try {
-    await StatusStore.setStatus(tmdbId, kind, status);
-  } catch (e) {
-    alert("Save failed: " + (e.message || e));
-  }
+// Glue only: the optimistic edit + rollback lives in web/status-edit.js and
+// the retrying write in web/write-queue.js, so the same accountable path runs
+// here and on the search page.
+function statusEditDeps() {
+  return {
+    isLoggedIn: () => loggedIn,
+    statusMap: STATUS_MAP,
+    statusKey: StatusStore.statusKey,
+    submit: ops => (WRITES
+      ? WRITES.submit(ops)
+      : Promise.resolve({ ok: false, permanent: true, error: new Error("not connected") })),
+    repaint: () => {
+      DATA.titles = StatusStore.applyStatuses(RAW_TITLES, STATUS_MAP);
+      render();  // optimistic — the marked title leaves the candidate list
+    },
+    notify: msg => alert(msg),
+  };
+}
+
+function markStatus(tmdbId, kind, status) {
+  return StatusEdit.markStatus(statusEditDeps(), tmdbId, kind, status);
 }
 
 function onStatusClick(e) {
