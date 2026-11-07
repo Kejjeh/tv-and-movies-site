@@ -148,6 +148,27 @@
     else map.set(key, entry.base);
     release(edits, key, entry);
     deps.repaint();
+    /* "Undone" is only true when the server refused it.
+     *
+     * A write that merely ran out of retries — the connection dropped for the
+     * few seconds the outbox was willing to wait — is still here: on disk, in
+     * the queue, and sent by the outbox itself the moment the browser is back
+     * online, at which point it reappears (see `onReplay`). Telling the user
+     * it was undone is how a rating gets made a second time, or given up on,
+     * when nothing was ever lost. It comes off screen either way, because
+     * this page does not show a decision the server has not taken yet.
+     *
+     * `lost` is excluded deliberately: it is not a refusal either, but there
+     * is nothing holding it — the browser would not store it — so it has to
+     * be made again, and the tail below says so. */
+    if (!result.permanent && !result.lost) {
+      deps.notify(
+        `“${status}” isn't saved yet — there's no connection. It's kept here and `
+        + `goes out by itself when you're back online, so there's no need to rate it again.`,
+        "error",
+      );
+      return { ok: false, reason: "write", stalled: true, error: result.error };
+    }
     deps.notify(
       `Couldn't save “${status}” — the rating was undone. ${errText(result.error)}`,
       "error",
@@ -158,6 +179,29 @@
   function errText(err) {
     if (!err) return "";
     return String(err.message || err);
+  }
+
+  /* A WRITE the outbox sent with nobody waiting on it — a dead letter the
+   * user retried, work restored from a previous page load, or one that went
+   * out by itself when the connection came back. Its submit() promise
+   * resolved long ago (and, for a failure, the rating was taken off screen
+   * and said so), so this is the only chance the page has to agree with the
+   * server again.
+   *
+   * `ops` is the whole write, in write order, and `err` is set if ANY part of
+   * it failed. Both matter: a confirm is `queueAdd` then `setStatus`, and
+   * acting on a half-landed write would put a rating back on screen that the
+   * server went on to refuse. Only a write that landed whole is applied. */
+  function applyReplay(statusMap, ops, err) {
+    if (err || !ops) return false;
+    const list = Array.isArray(ops) ? ops : [ops];
+    // The last setStatus is the one that decides the visible value; a group
+    // with none (a bare skip or queue-add) changes no rating on this page.
+    let landed = null;
+    for (const op of list) if (op && op.op === "setStatus" && op.args) landed = op;
+    if (!landed) return false;
+    statusMap.set(landed.key, landed.args.status);
+    return true;
   }
 
   /* Re-merge a freshly loaded server overlay into the LIVE status map.
@@ -186,7 +230,7 @@
     return statusMap;
   }
 
-  const API = { markStatus, mergeServerStatuses };
+  const API = { markStatus, mergeServerStatuses, applyReplay };
   global.StatusEdit = API;
   if (typeof module !== "undefined" && module.exports) module.exports = API;
 })(typeof globalThis !== "undefined" ? globalThis : this);

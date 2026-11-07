@@ -62,7 +62,22 @@
       const sb = StatusStore.init(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
       writes = WriteQueue.createWriteQueue({
         transport: StatusStore.writeTransport(),
-        onChange: st => renderOutbox(document.getElementById("outbox"), st, writes),
+        onChange: st => renderOutbox(document.getElementById("outbox"), st, writes, titleFor),
+        /* A confirm or skip that went out with nobody waiting on it — retried
+         * by hand, or sent by the outbox itself when the connection came
+         * back. Its card was put back in the deck when it failed; if the
+         * decision landed IN FULL, take it out again.
+         *
+         * `err` covers the whole write, and that is the point: a confirm is
+         * queueAdd then setStatus, and a replay where the queueAdd lands and
+         * the setStatus is refused must leave the card exactly where the
+         * user can see it. Dropping the card on the queueAdd alone hid a
+         * title whose rating the server had rejected. */
+        onReplay: (ops, err) => {
+          if (err || !ops || !ops.length) return;
+          markHandled(ops[0].key);
+          showTab(state.activeTab);
+        },
       });
       sb.auth.onAuthStateChange(() => { refreshAuthUI(); reloadOverlay(); });
       await reloadOverlay();
@@ -495,7 +510,7 @@
     const tmdbId = Number(wrap.dataset.tmdb);
     const kind = wrap.dataset.kind;
     const name = wrap.dataset.name;
-    if (btn.dataset.skip) skip(tmdbId, kind, wrap);
+    if (btn.dataset.skip) skip(tmdbId, kind, wrap, name);
     else confirmSeen(tmdbId, kind, name, btn.dataset.status, wrap);
   }
 
@@ -516,12 +531,20 @@
   }
 
   function confirmSeen(tmdbId, kind, name, status, wrap) {
+    NAMES.set(`${tmdbId}|${kind}`, name);
     return ConfirmActions.confirmSeen(actionDeps(wrap), { tmdbId, kind, name, status });
   }
 
-  function skip(tmdbId, kind, wrap) {
+  function skip(tmdbId, kind, wrap, name) {
+    if (name) NAMES.set(`${tmdbId}|${kind}`, name);
     return ConfirmActions.skipTitle(actionDeps(wrap), { tmdbId, kind });
   }
+
+  /* The deck is built per tab, so there is no catalogue to look a key up in.
+   * Names are remembered as decisions are made instead — which is exactly the
+   * set the indicator ever needs to name. */
+  const NAMES = new Map();
+  function titleFor(key) { return NAMES.get(key) || null; }
 
   function markHandled(k) {
     state.handled.add(k);

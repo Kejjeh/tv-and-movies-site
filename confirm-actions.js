@@ -79,6 +79,19 @@
       deps.notify(`${what} yet — it's kept, and goes out the next time you log in to this account.`, "error");
       return { ok: false, reason: "write", deferred: true, error: result.error };
     }
+    /* Ran out of retries rather than being refused: the write is still in
+     * the outbox, on disk, and goes out when the connection is back. The card
+     * returns so the deck is honest about what this browser has actually
+     * confirmed — but the decision is not lost, and must not be reported as
+     * though it were. `lost` is not this case: nothing is holding that one,
+     * so it falls through to the tail and asks for the decision again. */
+    if (!result.permanent && !result.lost) {
+      deps.notify(
+        `${what} yet — there's no connection. It's kept, and goes out by itself when you're back online.`,
+        "error",
+      );
+      return { ok: false, reason: "write", stalled: true, error: result.error };
+    }
     deps.notify(`${what} — it's back in the deck. ${errText(result.error)}`, "error");
     return { ok: false, reason: "write", error: result.error };
   }

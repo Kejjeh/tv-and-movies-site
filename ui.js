@@ -58,9 +58,29 @@
   // while this tab is still holding work of its own.
   const MIRROR_BLOCKED = { storage: true, stale: true };
 
+  /* Name the titles a message is about, so "2 changes couldn't be saved" is
+   * something the user can act on instead of a riddle. `labelFor(key)` is the
+   * page's own lookup (it already has the titles on screen); without one, or
+   * for a key it doesn't know, the list is simply omitted rather than padded
+   * with ids the user has never seen. Capped, because a banner is not a list
+   * view and the count above it is already exact. */
+  const NAMED = 3;
+  function nameThem(ops, labelFor) {
+    if (typeof labelFor !== "function") return "";
+    const names = [];
+    for (const o of ops || []) {
+      const label = labelFor(o.key);
+      if (label && !names.includes(label)) names.push(label);
+    }
+    if (!names.length) return "";
+    if (names.length <= NAMED) return ` (${names.join(", ")})`;
+    const rest = names.length - NAMED;
+    return ` (${names.slice(0, NAMED).join(", ")} and ${rest} more)`;
+  }
+
   // Pure: what the banner should say for a given write-queue state, or null
   // when there is nothing owed. Tested; renderOutbox below is the DOM glue.
-  function outboxMessage(state) {
+  function outboxMessage(state, labelFor) {
     if (!state) return null;
     const plural = n => (n === 1 ? "change" : "changes");
     /* A mirror that can't be trusted outranks everything else the indicator
@@ -80,12 +100,29 @@
       return { kind: "error", text: READ_ONLY_TEXT[state.readOnlyReason] + owed, retry: true };
     }
     if (state.failed > 0) {
-      return {
-        kind: "error",
-        text: `${state.failed} ${plural(state.failed)} couldn't be saved.`,
-        retry: true,
-        dismiss: true,     // only a dead letter can be given up on
-      };
+      const ops = state.failedOps || [];
+      const stalled = state.stalled || 0;
+      /* Two very different facts used to share one sentence. A write the
+       * server refused needs the user to decide something. A write that ran
+       * out of retries while the connection was down needs nothing from them
+       * at all — it is still here, still on disk, and goes out by itself when
+       * the browser reconnects. Telling them that one "couldn't be saved" is
+       * how a rating gets re-entered, or given up on, for no reason. */
+      if (stalled === state.failed) {
+        return {
+          kind: "error",
+          text: `${state.failed} ${plural(state.failed)} ${state.failed === 1 ? "hasn't" : "haven't"} been sent`
+            + `${nameThem(ops, labelFor)} — there was no connection. `
+            + `Nothing is lost: this goes out by itself when you're back online.`,
+          retry: true,
+          dismiss: true,
+        };
+      }
+      const refused = ops.filter(o => o.fatal);
+      const n = state.failed - stalled;
+      let text = `${n} ${plural(n)} couldn't be saved${nameThem(refused, labelFor)}.`;
+      if (stalled > 0) text += ` ${stalled} more ${stalled === 1 ? "is" : "are"} waiting for the connection.`;
+      return { kind: "error", text, retry: true, dismiss: true };
     }
     if (state.pending > 0) {
       const saving = `Saving ${state.pending} ${plural(state.pending)}…`;
@@ -113,27 +150,66 @@
     return null;
   }
 
-  // Paint the indicator into `el` for `state`, wiring Retry/Dismiss to the
+  /* What the user is asked before anything is thrown away.
+   *
+   * The button used to say "Dismiss" and delete the writes on the first
+   * click. Dismiss means "hide this message" to anyone who has used a
+   * computer, and what it actually did was erase unsent ratings from memory
+   * and from disk, with no confirmation and without ever saying which ones.
+   * Giving up on a write is a real choice the user is allowed to make — but
+   * it has to be the choice they think they are making, so it is named, it is
+   * counted, and it takes a second click. */
+  function discardPrompt(state, labelFor) {
+    const n = (state && state.failed) || 0;
+    const what = nameThem((state && state.failedOps) || [], labelFor);
+    return `Give up on ${n} unsaved ${n === 1 ? "change" : "changes"}${what}? `
+      + `They will never be sent, and this can't be undone.`;
+  }
+
+  // Paint the indicator into `el` for `state`, wiring the buttons to the
   // queue. Hidden entirely when nothing is owed, so the steady state is quiet.
-  function renderOutbox(el, state, queue) {
+  // `labelFor(key)` is optional — see nameThem.
+  function renderOutbox(el, state, queue, labelFor) {
     if (!el) return;
-    const msg = outboxMessage(state);
-    if (!msg) { el.hidden = true; el.innerHTML = ""; return; }
+    const msg = outboxMessage(state, labelFor);
+    if (!msg) { el.hidden = true; el.innerHTML = ""; el.dataset.confirming = ""; return; }
     el.hidden = false;
     el.className = `outbox outbox-${msg.kind}`;
+    // Mid-confirmation, and there is still something to give up on: keep
+    // asking rather than repainting the question away under the cursor.
+    if (el.dataset.confirming === "discard" && msg.dismiss) {
+      el.innerHTML = `<span>${escapeHtml(discardPrompt(state, labelFor))}</span>`
+        // Keep them first: the destructive answer should not be the one
+        // sitting where the button the user just pressed used to be.
+        + '<button class="auth-btn" data-outbox="discard-no">Keep them</button>'
+        + '<button class="auth-btn" data-outbox="discard-yes">Give up on them</button>';
+      if (!queue) return;
+      el.querySelector('[data-outbox="discard-yes"]').onclick = () => {
+        el.dataset.confirming = "";
+        queue.discardFailed();
+      };
+      el.querySelector('[data-outbox="discard-no"]').onclick = () => {
+        el.dataset.confirming = "";
+        renderOutbox(el, state, queue, labelFor);
+      };
+      return;
+    }
+    el.dataset.confirming = "";
     el.innerHTML = `<span>${escapeHtml(msg.text)}</span>`
       + (msg.retry ? '<button class="auth-btn" data-outbox="retry">Try again</button>' : "")
-      + (msg.dismiss ? '<button class="auth-btn" data-outbox="discard">Dismiss</button>' : "");
+      + (msg.dismiss ? '<button class="auth-btn" data-outbox="discard">Give up on them…</button>' : "");
     if (!queue) return;
-    // Try again is both affordances in one: it replays the dead letters, and
-    // it re-attempts the storage write a paused queue is waiting on. Dismiss
-    // is offered only where there is something to give up on.
+    // Try again is every affordance in one: it replays the dead letters, and
+    // it re-attempts the storage write a paused queue is waiting on.
     if (msg.retry) el.querySelector('[data-outbox="retry"]').onclick = () => queue.retryFailed();
-    if (msg.dismiss) el.querySelector('[data-outbox="discard"]').onclick = () => queue.discardFailed();
+    if (msg.dismiss) el.querySelector('[data-outbox="discard"]').onclick = () => {
+      el.dataset.confirming = "discard";
+      renderOutbox(el, state, queue, labelFor);
+    };
   }
 
   const UI = { escapeHtml, formatYear, narrativeLabel, colorFor, titleCase,
-               outboxMessage, renderOutbox };
+               outboxMessage, renderOutbox, discardPrompt };
 
   // Browser globals (classic scripts).
   global.escapeHtml = escapeHtml;

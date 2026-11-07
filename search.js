@@ -352,13 +352,27 @@
       }
     }
 
+    // Unsent work named in titles rather than ids — see app.js's copy.
+    function titleFor(key) {
+      const t = RAW_TITLES.find(x => `${x.tmdb_id}|${x.kind}` === key);
+      return t ? t.name : null;
+    }
+
     async function initStatuses() {
       if (!global.StatusStore || !global.SUPABASE_URL) return;
       try {
         const sb = StatusStore.init(global.SUPABASE_URL, global.SUPABASE_ANON_KEY);
         writes = WriteQueue.createWriteQueue({
           transport: StatusStore.writeTransport(),
-          onChange: st => renderOutbox(document.getElementById("outbox"), st, writes),
+          onChange: st => renderOutbox(document.getElementById("outbox"), st, writes, titleFor),
+          // See app.js: a write sent with nobody waiting on it goes back on
+          // screen, because its failure already took it off.
+          onReplay: (ops, err) => {
+            if (StatusEdit.applyReplay(statusMap, ops, err)) {
+              titles = StatusStore.applyStatuses(RAW_TITLES, statusMap);
+              run();
+            }
+          },
         });
         sb.auth.onAuthStateChange(() => { refreshAuthUI(); reloadStatuses(); });
         StatusEdit.mergeServerStatuses(statusMap, await StatusStore.loadStatuses(), []);

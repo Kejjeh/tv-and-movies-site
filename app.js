@@ -90,13 +90,30 @@ async function load() {
 
 /* ====== Status editing (Supabase) ====== */
 
+// The outbox reports unsent work by key; the indicator says it in titles the
+// user recognises. Unknown keys simply go unnamed — see UI.nameThem.
+function titleFor(key) {
+  const t = RAW_TITLES.find(x => `${x.tmdb_id}|${x.kind}` === key);
+  return t ? t.name : null;
+}
+
 async function initStatuses() {
   if (!window.StatusStore || !window.SUPABASE_URL) return;
   try {
     const sb = StatusStore.init(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
     WRITES = WriteQueue.createWriteQueue({
       transport: StatusStore.writeTransport(),
-      onChange: st => renderOutbox(document.getElementById("outbox"), st, WRITES),
+      onChange: st => renderOutbox(document.getElementById("outbox"), st, WRITES, titleFor),
+      // A write that went out with nobody waiting on it — a retried dead
+      // letter, or one the outbox sent by itself when the connection came
+      // back. Its rating was taken off screen when it failed, so put it back,
+      // but only once the WHOLE write landed (applyReplay checks `err`).
+      onReplay: (ops, err) => {
+        if (StatusEdit.applyReplay(STATUS_MAP, ops, err)) {
+          DATA.titles = StatusStore.applyStatuses(RAW_TITLES, STATUS_MAP);
+          render();
+        }
+      },
     });
     // Re-merge + refresh the auth bar whenever login state changes
     // (e.g. when the magic-link redirect lands).

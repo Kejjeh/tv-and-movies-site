@@ -240,6 +240,12 @@
    *               exercise the fail-closed path
    *   sleep       async (ms) => void — injected in tests to skip real waiting
    *   onChange    (state) => void — called whenever the reportable state moves
+   *   onReplay    (ops, err) => void — a WRITE (one submitted group, in write
+   *               order) finished with nobody waiting on it: a dead letter
+   *               the user retried, or work restored from a previous page
+   *               load. The submit() promise is long gone, so this is the
+   *               only way the page hears the outcome. Reported per group,
+   *               never per op — see `replayLeft`.
    *   sessionId   string — pin the group-id prefix (tests only)
    *   maxAttempts / baseDelayMs / maxDelayMs
    */
@@ -251,6 +257,7 @@
     const locks = opts.locks !== undefined ? opts.locks : defaultLocks();
     const sleep = opts.sleep || (ms => new Promise(r => setTimeout(r, ms)));
     const onChange = opts.onChange || function () {};
+    const onReplay = opts.onReplay || function () {};
     const maxAttempts = opts.maxAttempts != null ? opts.maxAttempts : MAX_ATTEMPTS;
     const baseDelay = opts.baseDelayMs != null ? opts.baseDelayMs : BASE_DELAY_MS;
     const maxDelay = opts.maxDelayMs != null ? opts.maxDelayMs : MAX_DELAY_MS;
@@ -505,6 +512,9 @@
       for (const o of pending) o.saved = true;
       for (const o of failed) o.saved = true;
       if (carried && carried.length) pending = pending.concat(carried);
+      // Nothing here has a waiter — this page has never seen any of it — so
+      // the whole restored set is replay-reported when it settles.
+      trackReplay(pending.concat(failed));
       persist();
     }
 
@@ -524,7 +534,13 @@
         // Copies: callers render these, they must not be able to edit the
         // outbox. `blocked` marks an op that was withheld because an earlier
         // op of the same write failed — it was never sent.
-        failedOps: failed.map(o => ({ op: o.op, key: o.key, error: o.error, blocked: !!o.blocked })),
+        failedOps: failed.map(o => ({ op: o.op, key: o.key, error: o.error,
+                                     blocked: !!o.blocked, fatal: !!o.fatal })),
+        // Of the dead letters, how many gave up only because the network was
+        // unreachable. They are still held, still on disk, and go out by
+        // themselves the moment the connection is back — so the indicator
+        // must not file them under "couldn't be saved" next to a refusal.
+        stalled: failed.reduce((n, o) => n + (o.fatal ? 0 : 1), 0),
         // This tab is signed in but cannot save edits. Surfaced rather than
         // hidden: a tab that silently swallows ratings is the failure this
         // module exists to prevent.
@@ -564,11 +580,68 @@
       if (op && op.saved) retired = true;
     }
 
+    /* Replay bookkeeping for writes nobody is waiting on.
+     *
+     * `groups` only covers writes submitted in this session, and only until
+     * their promise resolves. Work restored from a previous page load never
+     * had an entry, and a dead letter's entry is long gone — so when those
+     * settle, this is what remembers how much of the write is still to come.
+     *
+     * It has to be the whole write, not each op. A confirm is `queueAdd` THEN
+     * `setStatus` (ADR 0005), and reporting the queueAdd's success on its own
+     * told confirm.js the card was handled while the rating behind it was
+     * still unsent — and, if that setStatus was then refused, never sent at
+     * all. The card vanished for a decision the server rejected. Nothing is
+     * reported until every op of the write has settled, and one refusal makes
+     * the whole write a failure, exactly as submit() would have resolved it. */
+    const replayLeft = new Map();    // gid -> Set of op ids still to settle
+    const replayGot = new Map();     // gid -> { ops, error }
+
+    /* Ops entering the queue with no waiter: restored from storage, or dead
+     * letters put back by Try again / a reconnect (their group resolved when
+     * they first failed, so there is nothing left listening).
+     *
+     * By op ID, and idempotent, because the SAME op is routinely tracked
+     * twice: adopt() takes in everything the mirror holds, pending and failed
+     * alike, and a dead letter among them is then handed here again the
+     * moment it is revived. A counter double-counted it and never reached
+     * zero, so the commonest case of all — reload with a failed outbox, then
+     * reconnect — sent both ops and told the page nothing. */
+    function trackReplay(ops) {
+      for (const o of ops) {
+        if (groups.has(o.gid)) continue;
+        let left = replayLeft.get(o.gid);
+        if (!left) { left = new Set(); replayLeft.set(o.gid, left); }
+        left.add(o.id);
+      }
+    }
+
+    // A session's replay bookkeeping dies with the session. teardown() drops
+    // dead letters without settling them, so their entries would otherwise
+    // outlive the account they belong to and corrupt the next one's counts.
+    function forgetReplays() { replayLeft.clear(); replayGot.clear(); }
+
+    function replayed(op, err, info) {
+      const gid = op.gid;
+      const left = replayLeft.get(gid);
+      if (left) left.delete(op.id);
+      const got = replayGot.get(gid) || { ops: [], error: null };
+      // A superseded op is not part of the outcome: a newer write for the same
+      // key owns both the value and the reporting of it.
+      if (!(info && info.superseded)) got.ops.push(op);
+      if (err && !got.error) got.error = err;
+      // Untracked (no entry at all) means a write of one op, reported now.
+      if (left && left.size > 0) { replayGot.set(gid, got); return; }
+      replayLeft.delete(gid);
+      replayGot.delete(gid);
+      if (got.ops.length) onReplay(got.ops, got.error);
+    }
+
     // Settle one op against its submitting group. A group resolves once every
     // op in it has landed or failed; the first error wins the outcome.
     function settle(op, err, info) {
       const g = groups.get(op.gid);
-      if (!g) return;                       // restored from storage: no waiter
+      if (!g) { replayed(op, err || null, info); return; }
       if (err && !g.error) g.error = err;
       if (info && info.superseded) g.superseded = true;
       if (info && info.deferred) g.deferred = true;
@@ -622,6 +695,7 @@
         retire(o);
         o.attempts = 0;
         o.blocked = true;
+        o.fatal = !!op.fatal;   // only as hopeless as the op that took it down
         o.error = `not sent — "${op.op}" failed first in the same write`;
         failed.push(o);     // after the op that failed, so a retry keeps order
       }
@@ -750,6 +824,7 @@
         if (o.saved) settle(o, kept, { deferred: true });
         else settle(o, gone, { lost: true });
       }
+      forgetReplays();
     }
 
     /* Take over the live queue for `acct`, then find out whether this tab may
@@ -955,6 +1030,7 @@
           const fn = transport[op.op];
           if (typeof fn !== "function") {
             op.error = `no transport for ${op.op}`;
+            op.fatal = true;
             remove(op);
             failed.push(op);
             abandonGroup(op, new Error(op.error));
@@ -984,9 +1060,17 @@
             continue;
           }
           op.attempts += 1;
-          const giveUp = classifyError(failure) === "permanent" || op.attempts >= maxAttempts;
+          const refused = classifyError(failure) === "permanent";
+          const giveUp = refused || op.attempts >= maxAttempts;
           if (giveUp) {
             op.error = String((failure && failure.message) || failure);
+            /* Why it gave up, which is the whole difference between "the
+             * server said no" and "we couldn't reach it". A refusal will be
+             * refused again; a spent retry budget means only that the network
+             * was down for the few seconds we were willing to wait, and the
+             * moment it is back this is worth sending. Persisted with the op,
+             * so a reload still knows. */
+            op.fatal = refused;
             remove(op);
             failed.push(op);
             abandonGroup(op, failure);
@@ -1007,18 +1091,58 @@
      * reset, because the user asking again is new information. They go in
      * AFTER the op being sent right now, which keeps that op's completion
      * (and its FIFO position) intact. */
-    function retryFailed() {
-      // Try again is the recovery affordance too: storage that refused the
-      // prune (or the read) may take it now, and that is what lets a paused
-      // queue move again without the user having to re-rate anything.
-      recover();
-      if (!failed.length) return flush();
-      const revived = failed.map(o => ({ ...o, attempts: 0, error: undefined, blocked: false }));
-      failed = [];
+    /* Put dead letters back at the head of the queue, after whatever is on
+     * the wire right now so that op's completion (and its FIFO position)
+     * survives. Attempt counts reset: something has changed since they gave
+     * up. Shared by the user's Try again and by the reconnect below. */
+    function revive(take) {
+      const back = failed.filter(take);
+      if (!back.length) return false;
+      failed = failed.filter(o => !take(o));
+      const revived = back.map(o => ({ ...o, attempts: 0, error: undefined,
+                                       blocked: false, fatal: false }));
+      trackReplay(revived);
       const at = inflight ? pending.indexOf(inflight) + 1 : 0;
       pending = pending.slice(0, at).concat(revived, pending.slice(at));
       persist(); notify();
+      return true;
+    }
+
+    /* The browser says the connection is back.
+     *
+     * Writes made in a tunnel or a lift spend their whole retry budget in the
+     * few seconds the network is gone and dead-letter. Before this, nothing
+     * moved them again: the user had to notice a small banner and press a
+     * button, and if they closed the tab believing a rating had saved, it
+     * never did. A refusal is different and is left where it is — the server
+     * has already answered, and asking again just to be told no again is not
+     * recovery. */
+    function resume() {
+      if (!started) return Promise.resolve();
+      /* Safe to take only part of `failed`: a write is dead-lettered whole
+       * (abandonGroup gives the withheld ops the failing op's own `fatal`),
+       * so this predicate can never revive half a group and leave the rest
+       * behind for the replay report to wait on forever. */
+      revive(o => !o.fatal);
+      return retryStorage();
+    }
+
+    // The storage half of recovery, shared by resume() and Try again: a
+    // refused prune or an unreadable key may be readable now, and until it is
+    // the drain stays paused however healthy the network gets.
+    function retryStorage() {
+      recover();
       return flush();
+    }
+
+    function retryFailed() {
+      // Try again is the recovery affordance too: storage that refused the
+      // prune (or the read) may take it now, and that is what lets a paused
+      // queue move again without the user having to re-rate anything. The
+      // user asking is new information about every dead letter, refusals
+      // included, so this one revives the lot.
+      revive(() => true);
+      return retryStorage();
     }
 
     /* Forget the dead-lettered ops (the user accepted the loss). Pending ops
@@ -1030,7 +1154,15 @@
       persist(); notify();
     }
 
-    return { submit, start, stop, flush, state, retryFailed, discardFailed };
+    /* Recover by themselves when the browser reconnects. A page that is
+     * open when the wifi comes back should not need the user to notice
+     * anything at all. Best-effort and never throws into page code; tests and
+     * the acceptance harness call `resume()` directly. */
+    if (global.addEventListener) {
+      global.addEventListener("online", () => { try { resume(); } catch (_) { /* never breaks the page */ } });
+    }
+
+    return { submit, start, stop, flush, state, retryFailed, discardFailed, resume };
   }
 
   const API = { createWriteQueue, classifyError, STORAGE_KEY, LEGACY_KEY };
