@@ -8,7 +8,7 @@
   "use strict";
 
   // Status words accepted after a "|" or "-" separator. "seen" is the UI label
-  // for the default 'ok' (see CONTEXT.md), so it maps there.
+  // for the default 'ok' (see GLOSSARY.md), so it maps there.
   const STATUS_WORDS = {
     loved: "loved", liked: "liked", ok: "ok", seen: "ok",
     started: "started", disliked: "disliked", hated: "hated",
